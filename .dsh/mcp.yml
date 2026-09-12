@@ -1,0 +1,29 @@
+# cordis.patch.yml
+# Appends your standard Claude Code MCP definitions to the active DSH execution tree
+
+- id: mcp-server-context7
+  insert: true
+  plugin: '@deepseek-ai/dsh-mcp-client'
+  config:
+    serverName: context7
+    type: stdio
+    command: npx
+    args:
+      - -y
+      - '@upstash/context7-mcp@latest'
+
+- id: mcp-server-playwright
+  insert: true
+  plugin: '@deepseek-ai/dsh-mcp-client'
+  config:
+    serverName: playwright
+    type: stdio
+    command: npx
+    args:
+      - -y
+      - '@playwright/mcp@latest'
+      - --headless
+      - --isolated
+      - --browser=chromium
+      - --viewport-size=1280x800
+    env: {}
