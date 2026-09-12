@@ -1,11 +1,12 @@
 import { CameraView, useCameraPermissions } from 'expo-camera';
-import { useFocusEffect, useRouter } from 'expo-router';
+import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Pressable,
   StyleSheet,
   Text,
+  TextInput,
   View,
 } from 'react-native';
 
@@ -16,29 +17,52 @@ import { ToastBubble } from '@/components/toast-bubble';
 import { Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { preparePhoto, type ProcessedPhoto } from '@/lib/image-pipeline';
-import { addPhoto, createRoom, removePhoto } from '@/lib/session-store';
+import {
+  addPhoto,
+  createRoom,
+  getPhotos,
+  getRoomLabel,
+  hasRoom,
+  removePhoto,
+  renameRoom,
+} from '@/lib/session-store';
 
 const TOAST_DURATION_MS = 2500;
 
 /**
  * Capture screen: permission gate → live camera preview → shutter → per-room photo
- * strip → hand off to the blueprint screen. One room session is created per visit.
+ * strip → hand off to the blueprint screen. Joins the room given via `?room=` (from the
+ * room list) or creates a new one; the room name is editable in place.
  */
 export function CaptureScreen() {
   const theme = useTheme();
   const router = useRouter();
   const [permission, requestPermission] = useCameraPermissions();
+  const { room } = useLocalSearchParams<{ room?: string }>();
 
-  // One room session per visit to this screen.
-  const [roomId] = useState(() => createRoom());
+  // Join an existing room when opened with a valid id; otherwise start a new one.
+  const [roomId] = useState(() =>
+    typeof room === 'string' && hasRoom(room) ? room : createRoom(),
+  );
 
   const cameraRef = useRef<CameraView | null>(null);
   const [cameraReady, setCameraReady] = useState(false);
   const [screenFocused, setScreenFocused] = useState(true);
   const [capturing, setCapturing] = useState(false);
-  const [photos, setPhotos] = useState<ProcessedPhoto[]>([]);
+  const [photos, setPhotos] = useState<ProcessedPhoto[]>(() =>
+    getPhotos(roomId),
+  );
+  const [roomName, setRoomName] = useState(() => getRoomLabel(roomId) ?? '');
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const handleNameChange = useCallback(
+    (text: string) => {
+      setRoomName(text);
+      renameRoom(roomId, text);
+    },
+    [roomId],
+  );
 
   // The camera docs require unmounting the preview whenever the screen is unfocused
   // (only one active camera preview is allowed at a time).
@@ -153,6 +177,17 @@ export function CaptureScreen() {
         )}
       </View>
 
+      <View style={[styles.nameBar, { backgroundColor: theme.background }]}>
+        <TextInput
+          value={roomName}
+          onChangeText={handleNameChange}
+          placeholder="Room name"
+          placeholderTextColor={theme.textSecondary}
+          maxLength={40}
+          style={[styles.nameInput, { color: theme.text }]}
+        />
+      </View>
+
       {photos.length > 0 && (
         <PhotoStrip
           photos={photos}
@@ -224,6 +259,16 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     paddingHorizontal: Spacing.four,
     paddingVertical: Spacing.two,
+  },
+  nameBar: {
+    paddingHorizontal: Spacing.three,
+    paddingVertical: Spacing.two,
+  },
+  nameInput: {
+    backgroundColor: 'transparent',
+    fontSize: 16,
+    fontWeight: 600,
+    paddingVertical: Spacing.one,
   },
   footer: {
     alignItems: 'center',

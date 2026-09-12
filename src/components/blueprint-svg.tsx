@@ -3,7 +3,12 @@ import { StyleSheet, View, type ViewStyle } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
 import { useTheme } from '@/hooks/use-theme';
-import type { FloorPlan, Point } from '@/lib/blueprint-schema';
+import {
+  planBounds,
+  pointOnWall,
+  polygonCentroid,
+  type FloorPlan,
+} from '@/lib/blueprint-schema';
 
 interface BlueprintSvgProps {
   plan: FloorPlan;
@@ -16,59 +21,18 @@ const WALL_WIDTH_M = 0.08;
 const PADDING_M = 0.6;
 /** Minimum plan size so very small plans still render legibly. */
 const MIN_SIZE_M = 4;
-
-interface Bounds {
-  minX: number;
-  minY: number;
-  maxX: number;
-  maxY: number;
-}
-
-function computeBounds(plan: FloorPlan): Bounds | null {
-  let minX = Infinity;
-  let minY = Infinity;
-  let maxX = -Infinity;
-  let maxY = -Infinity;
-
-  const absorb = (point: Point) => {
-    if (!Number.isFinite(point[0]) || !Number.isFinite(point[1])) return;
-    minX = Math.min(minX, point[0]);
-    minY = Math.min(minY, point[1]);
-    maxX = Math.max(maxX, point[0]);
-    maxY = Math.max(maxY, point[1]);
-  };
-
-  for (const wall of plan.walls) {
-    absorb(wall.from);
-    absorb(wall.to);
-  }
-  for (const room of plan.rooms) {
-    for (const point of room.polygon) absorb(point);
-  }
-
-  if (!Number.isFinite(minX) || !Number.isFinite(maxY)) return null;
-  return { minX, minY, maxX, maxY };
-}
-
-function centroid(polygon: Point[]): Point {
-  let x = 0;
-  let y = 0;
-  for (const point of polygon) {
-    x += point[0];
-    y += point[1];
-  }
-  const count = Math.max(polygon.length, 1);
-  return [x / count, y / count];
-}
+/** Walls shorter than this (meters) get no dimension label (too cramped). */
+const MIN_LABELLED_WALL_M = 0.5;
 
 /**
  * Renders a floor plan as an SVG in meter coordinates: rooms as translucent filled
- * polygons with labels, walls as thick lines, openings as markers on their wall.
- * Element opacity scales with model confidence so uncertain geometry reads as fainter.
+ * polygons with labels, walls as thick lines with dimension labels, openings as markers
+ * on their wall. Element opacity scales with model confidence so uncertain geometry
+ * reads as fainter. Geometry helpers are shared with the file exporters.
  */
 export function BlueprintSvg({ plan, style }: BlueprintSvgProps) {
   const theme = useTheme();
-  const bounds = computeBounds(plan);
+  const bounds = planBounds(plan);
 
   if (bounds === null) {
     return (
@@ -122,8 +86,7 @@ export function BlueprintSvg({ plan, style }: BlueprintSvgProps) {
             const wall = wallsById.get(opening.wallId);
             if (wall === undefined) return null;
             const t = opening.positionT ?? 0.5;
-            const x = wall.from[0] + (wall.to[0] - wall.from[0]) * t;
-            const y = wall.from[1] + (wall.to[1] - wall.from[1]) * t;
+            const [x, y] = pointOnWall(wall.from, wall.to, t);
             const angle =
               (Math.atan2(
                 wall.to[1] - wall.from[1],
@@ -151,8 +114,30 @@ export function BlueprintSvg({ plan, style }: BlueprintSvgProps) {
               />
             );
           })}
+          {plan.walls.map((wall) => {
+            if (
+              wall.lengthM === undefined ||
+              wall.lengthM < MIN_LABELLED_WALL_M
+            ) {
+              return null;
+            }
+            const mx = (wall.from[0] + wall.to[0]) / 2;
+            const my = (wall.from[1] + wall.to[1]) / 2 - 0.15;
+            return (
+              <SvgText
+                key={`${wall.id}-dim`}
+                x={mx}
+                y={my}
+                fontSize={0.28}
+                fill={theme.textSecondary}
+                textAnchor="middle"
+              >
+                {`${wall.lengthM.toFixed(1)} m`}
+              </SvgText>
+            );
+          })}
           {plan.rooms.map((room) => {
-            const [cx, cy] = centroid(room.polygon);
+            const [cx, cy] = polygonCentroid(room.polygon);
             return (
               <SvgText
                 key={`${room.id}-label`}

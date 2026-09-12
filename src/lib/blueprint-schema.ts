@@ -238,3 +238,62 @@ export function validateFloorPlan(raw: unknown): FloorPlan {
 
   return { unit: 'meters', walls, rooms, openings, notes };
 }
+
+// ---------------------------------------------------------------------------
+// Geometry helpers (shared by the SVG renderer and the file exporters)
+// ---------------------------------------------------------------------------
+
+export interface PlanBounds {
+  minX: number;
+  minY: number;
+  maxX: number;
+  maxY: number;
+}
+
+/** Bounding box of all wall endpoints and room polygon points, or null when empty. */
+export function planBounds(plan: FloorPlan): PlanBounds | null {
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+
+  const absorb = (point: Point) => {
+    if (!Number.isFinite(point[0]) || !Number.isFinite(point[1])) return;
+    minX = Math.min(minX, point[0]);
+    minY = Math.min(minY, point[1]);
+    maxX = Math.max(maxX, point[0]);
+    maxY = Math.max(maxY, point[1]);
+  };
+
+  for (const wall of plan.walls) {
+    absorb(wall.from);
+    absorb(wall.to);
+  }
+  for (const room of plan.rooms) {
+    for (const point of room.polygon) absorb(point);
+  }
+
+  if (!Number.isFinite(minX) || !Number.isFinite(maxY)) return null;
+  return { minX, minY, maxX, maxY };
+}
+
+/** Arithmetic centroid of a polygon's vertices. */
+export function polygonCentroid(polygon: Point[]): Point {
+  let x = 0;
+  let y = 0;
+  for (const point of polygon) {
+    x += point[0];
+    y += point[1];
+  }
+  const count = Math.max(polygon.length, 1);
+  return [x / count, y / count];
+}
+
+/** A point at fractional position `t` along a wall (0 = from, 1 = to). */
+export function pointOnWall(
+  from: Point,
+  to: Point,
+  t: number,
+): [number, number] {
+  return [from[0] + (to[0] - from[0]) * t, from[1] + (to[1] - from[1]) * t];
+}

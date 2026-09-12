@@ -78,6 +78,26 @@ export function HomeScreen() {
 
         <Pressable
           accessibilityRole="button"
+          onPress={() => router.push('/rooms')}
+          style={({ pressed }) => [
+            {
+              backgroundColor: theme.backgroundElement,
+              borderRadius: 999,
+              paddingHorizontal: Spacing.four,
+              paddingVertical: Spacing.two,
+            },
+            pressed && styles.buttonPressed,
+          ]}
+        >
+          <Text
+            style={[styles.buttonLabel, { color: theme.text, fontSize: 14 }]}
+          >
+            Rooms
+          </Text>
+        </Pressable>
+
+        <Pressable
+          accessibilityRole="button"
           onPress={() => showToast('Test clicked!')}
           style={({ pressed }) => [
             {
