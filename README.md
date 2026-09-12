@@ -4,13 +4,14 @@ Cross-platform mobile app built with **React Native**, **Expo SDK 57**, and **Ty
 
 ## Stack
 
-| Layer | Choice | Notes |
-| --- | --- | --- |
-| Framework | React Native 0.86 + Expo SDK 57 | [Expo](https://expo.dev) is the officially recommended way to start a new RN app; autolinking handles native modules, and EAS Build produces store-ready artifacts for both platforms |
-| Language | TypeScript 6 (strict) | `pnpm typecheck` runs `tsc --noEmit`; extra safety flags on top of `strict`, see [TypeScript and linting](#typescript-and-linting) |
-| Linting | ESLint + eslint-config-expo | Flat config with the recommended Expo/React Native ruleset; `pnpm lint` |
-| Navigation | expo-router | File-based routing under `src/app/`; typed routes enabled |
-| Package manager | pnpm | Lockfile committed; use a single package manager per project |
+| Layer           | Choice                          | Notes                                                                                                                                                                                 |
+| --------------- | ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Framework       | React Native 0.86 + Expo SDK 57 | [Expo](https://expo.dev) is the officially recommended way to start a new RN app; autolinking handles native modules, and EAS Build produces store-ready artifacts for both platforms |
+| Language        | TypeScript 6 (strict)           | `pnpm typecheck` runs `tsc --noEmit`; extra safety flags on top of `strict`, see [TypeScript and linting](#typescript-and-linting)                                                    |
+| Linting         | ESLint + eslint-config-expo     | Flat config with the recommended Expo/React Native ruleset, Prettier integrated via `eslint-plugin-prettier`; `pnpm lint`                                                             |
+| Formatting      | Prettier                        | Minimal `.prettierrc` on top of defaults; format-on-save in VS Code; `pnpm format` / `pnpm format:check`                                                                              |
+| Navigation      | expo-router                     | File-based routing under `src/app/`; typed routes enabled                                                                                                                             |
+| Package manager | pnpm                            | Lockfile committed; use a single package manager per project                                                                                                                          |
 
 SDK 57 targets: Android 7+ (compileSdk/targetSdk 36), iOS 16.4+ (Xcode 26.4+), Node.js ≥ 22.13.
 
@@ -25,17 +26,19 @@ The first `expo` run generates `expo-env.d.ts` (gitignored) with type declaratio
 
 ### Scripts
 
-| Script | Purpose |
-| --- | --- |
-| `pnpm start` | Start the Expo/Metro dev server |
-| `pnpm ios` / `pnpm android` / `pnpm web` | Run on simulator/emulator/browser |
-| `pnpm typecheck` | TypeScript check (`tsc --noEmit`) |
-| `pnpm lint` | ESLint via `expo lint` |
+| Script                                   | Purpose                               |
+| ---------------------------------------- | ------------------------------------- |
+| `pnpm start`                             | Start the Expo/Metro dev server       |
+| `pnpm ios` / `pnpm android` / `pnpm web` | Run on simulator/emulator/browser     |
+| `pnpm typecheck`                         | TypeScript check (`tsc --noEmit`)     |
+| `pnpm lint`                              | ESLint via `expo lint`                |
+| `pnpm format` / `pnpm format:check`      | Format with Prettier (write / verify) |
 
 ### TypeScript and linting
 
 - **TypeScript** — `tsconfig.json` extends `expo/tsconfig.base` with `strict` plus extra safety flags: `noUncheckedIndexedAccess`, `noUnusedLocals`, `noUnusedParameters`, `noFallthroughCasesInSwitch`. Component props, theme tokens, and hooks are explicitly typed (named interfaces/unions in `src/constants/theme.ts`), so typos in token or variant names fail at compile time.
 - **ESLint** — `eslint.config.js` (flat config) extends [`eslint-config-expo`](https://docs.expo.dev/guides/using-eslint/), the recommended Expo/React Native ruleset, including the React Compiler-era hooks rules (`react-hooks/refs`, `react-hooks/set-state-in-effect`). Run `pnpm lint`; for diagnostics while editing, install the [ESLint VS Code extension](https://marketplace.visualstudio.com/items?itemName=dbaeumer.vscode-eslint).
+- **Prettier** — `.prettierrc` customizes only what the codebase needs (`singleQuote: true`); everything else follows [Prettier defaults](https://prettier.io/docs/en/options.html). It is wired into ESLint via `eslint-plugin-prettier/recommended`, so `pnpm lint` also fails on formatting drift. VS Code formats on save with the Prettier extension (see `.vscode/`).
 
 ## Project structure
 

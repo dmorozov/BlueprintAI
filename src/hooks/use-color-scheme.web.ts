@@ -11,7 +11,11 @@ const emptySubscribe = (): (() => void) => () => {};
  */
 export function useColorScheme() {
   const colorScheme = useRNColorScheme();
-  const hasHydrated = useSyncExternalStore(emptySubscribe, () => true, () => false);
+  const hasHydrated = useSyncExternalStore(
+    emptySubscribe,
+    () => true,
+    () => false,
+  );
 
   return hasHydrated ? colorScheme : 'light';
 }

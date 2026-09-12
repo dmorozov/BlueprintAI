@@ -1,5 +1,13 @@
 import { useEffect, useMemo } from 'react';
-import { Animated, Easing, Platform, StyleSheet, Text, View, type ViewStyle } from 'react-native';
+import {
+  Animated,
+  Easing,
+  Platform,
+  StyleSheet,
+  Text,
+  View,
+  type ViewStyle,
+} from 'react-native';
 
 type ToastBubbleProps = {
   /** Text to display; pass `null` to hide the bubble. */
@@ -47,13 +55,21 @@ export function ToastBubble({ message }: ToastBubbleProps) {
     outputRange: [SLIDE_DISTANCE, 0],
   });
   const shadowStyle: ViewStyle | undefined =
-    Platform.OS === 'android' ? styles.androidShadow : Platform.OS === 'ios' ? styles.iosShadow : undefined;
+    Platform.OS === 'android'
+      ? styles.androidShadow
+      : Platform.OS === 'ios'
+        ? styles.iosShadow
+        : undefined;
 
   return (
     <View pointerEvents="none" style={styles.container}>
       <Animated.View
         accessibilityRole="alert"
-        style={[styles.bubble, shadowStyle, { opacity: progress, transform: [{ translateY }] }]}
+        style={[
+          styles.bubble,
+          shadowStyle,
+          { opacity: progress, transform: [{ translateY }] },
+        ]}
       >
         <Text style={styles.text}>{message ?? ''}</Text>
       </Animated.View>

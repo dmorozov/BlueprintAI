@@ -18,7 +18,10 @@ export function HomeScreen() {
   const showToast = useCallback((message: string) => {
     setToastMessage(message);
     if (hideTimer.current !== null) clearTimeout(hideTimer.current);
-    hideTimer.current = setTimeout(() => setToastMessage(null), TOAST_DURATION_MS);
+    hideTimer.current = setTimeout(
+      () => setToastMessage(null),
+      TOAST_DURATION_MS,
+    );
   }, []);
 
   useEffect(
@@ -34,7 +37,11 @@ export function HomeScreen() {
         <ThemedText variant="title" style={styles.title}>
           BlueprintAI
         </ThemedText>
-        <ThemedText variant="small" themeColor="textSecondary" style={styles.tagline}>
+        <ThemedText
+          variant="small"
+          themeColor="textSecondary"
+          style={styles.tagline}
+        >
           React Native · Expo · TypeScript
         </ThemedText>
 

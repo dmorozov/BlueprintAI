@@ -83,7 +83,11 @@ const androidFonts: FontStacks = {
 
 /** Platform-specific font stacks, resolved once at module load. */
 export const Fonts: FontStacks =
-  Platform.OS === 'ios' ? iosFonts : Platform.OS === 'web' ? webFonts : androidFonts;
+  Platform.OS === 'ios'
+    ? iosFonts
+    : Platform.OS === 'web'
+      ? webFonts
+      : androidFonts;
 
 /** Spacing scale in logical pixels. */
 export const Spacing = {

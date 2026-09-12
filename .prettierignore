@@ -1,0 +1,17 @@
+# Build output
+dist/
+.expo/
+
+# Generated native projects (CNG)
+ios/
+android/
+
+# Session logs — not project code
+logs/
+
+# Managed by pnpm
+pnpm-lock.yaml
+
+# Local package-manager caches (created inside the workspace by sandboxed agent sessions)
+.home/
+.npm-cache/
