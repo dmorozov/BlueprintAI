@@ -1,11 +1,11 @@
 {
   "expo": {
-    "name": ".scaffold",
-    "slug": ".scaffold",
+    "name": "BlueprintAI",
+    "slug": "blueprintai",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": "scaffold",
+    "scheme": "blueprintai",
     "userInterfaceStyle": "automatic",
     "ios": {
       "icon": "./assets/expo.icon"

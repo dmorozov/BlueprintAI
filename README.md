@@ -1,56 +1,93 @@
-# Welcome to your Expo app 👋
+# BlueprintAI
 
-This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
+Cross-platform mobile app built with **React Native**, **Expo SDK 57**, and **TypeScript** (strict mode). One codebase targets Android and iOS (web works too, for quick iteration).
 
-## Get started
+## Stack
 
-1. Install dependencies
+| Layer | Choice | Notes |
+| --- | --- | --- |
+| Framework | React Native 0.86 + Expo SDK 57 | [Expo](https://expo.dev) is the officially recommended way to start a new RN app; autolinking handles native modules, and EAS Build produces store-ready artifacts for both platforms |
+| Language | TypeScript 6 (strict) | `pnpm typecheck` runs `tsc --noEmit` |
+| Navigation | expo-router | File-based routing under `src/app/`; typed routes enabled |
+| Package manager | pnpm | Lockfile committed; use a single package manager per project |
 
-   ```bash
-   npm install
-   ```
+SDK 57 targets: Android 7+ (compileSdk/targetSdk 36), iOS 16.4+ (Xcode 26.4+), Node.js ≥ 22.13.
 
-2. Start the app
-
-   ```bash
-   npx expo start
-   ```
-
-In the output, you'll find options to open the app in a
-
-- [development build](https://docs.expo.dev/develop/development-builds/introduction/)
-- [Android emulator](https://docs.expo.dev/workflow/android-studio-emulator/)
-- [iOS simulator](https://docs.expo.dev/workflow/ios-simulator/)
-- [Expo Go](https://expo.dev/go), a limited sandbox for trying out app development with Expo
-
-You can start developing by editing the files inside the **app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
-
-## Get a fresh project
-
-When you're ready, run:
+## Getting started
 
 ```bash
-npm run reset-project
+pnpm install
+pnpm start        # Expo dev server; press i / a / w for iOS, Android, or web
 ```
 
-This command will move the starter code to the **app-example** directory and create a blank **app** directory where you can start developing.
+The first `expo` run generates `expo-env.d.ts` (gitignored) with type declarations for assets/CSS — needed by `pnpm typecheck`.
 
-### Other setup steps
+### Scripts
 
-- To set up ESLint for linting, run `npx expo lint`, or follow our guide on ["Using ESLint and Prettier"](https://docs.expo.dev/guides/using-eslint/)
-- If you'd like to set up unit testing, follow our guide on ["Unit Testing with Jest"](https://docs.expo.dev/develop/unit-testing/)
-- Learn more about the TypeScript setup in this template in our guide on ["Using TypeScript"](https://docs.expo.dev/guides/typescript/)
+| Script | Purpose |
+| --- | --- |
+| `pnpm start` | Start the Expo/Metro dev server |
+| `pnpm ios` / `pnpm android` / `pnpm web` | Run on simulator/emulator/browser |
+| `pnpm typecheck` | TypeScript check (`tsc --noEmit`) |
+| `pnpm lint` | ESLint via `expo lint` |
+
+## Project structure
+
+```
+src/
+  app/                  # expo-router routes — thin files, navigation wiring only
+    _layout.tsx         # Root layout: theme provider, Stack navigator, splash handling
+    index.tsx           # Home route → renders HomeScreen
+  screens/              # Screen components (UI + local state)
+    home-screen.tsx     # Home page with the "Test" button
+  components/           # Reusable UI
+    toast-bubble.tsx    # Notification bubble ("toast"), pure React Native
+    themed-text.tsx     # Theme-aware text primitives
+    themed-view.tsx
+  constants/            # Design tokens
+    theme.ts            # Colors (light/dark), fonts, spacing
+  hooks/                # Shared hooks
+    use-theme.ts        # Resolves light/dark palette
+    use-color-scheme(.web).ts
+assets/                 # App icons, splash, adaptive-icon sources
+app.json                # Expo config: name, slug, scheme, icons, plugins
+```
+
+### Conventions
+
+- **Routes stay thin.** Files in `src/app/` only wire navigation; all UI lives in `src/screens/`, reusable pieces in `src/components/`. Add a new screen by adding a route file + a screen component.
+- **kebab-case** file names; components use named exports.
+- Import app code via the `@/*` path alias (maps to `src/*`).
+- No hardcoded colors in components — use tokens from `src/constants/theme.ts`.
+- Native folders (`/ios`, `/android`) are **generated** by Expo on first build and gitignored; see below before making manual native changes.
+
+## The home page
+
+The single home screen shows the app title and a **Test** button. Tapping it shows a notification bubble with the text **"Test clicked!"** — implemented as `ToastBubble`, a pure React Native component (spring in, auto-dismiss after 2 s) so it behaves identically on Android, iOS, and web without any native dependency.
+
+## Building native apps
+
+### Local builds (CNG — Continuous Native Generation)
+
+Expo generates the native projects on demand: the first `pnpm ios` or `pnpm android` runs prebuild and creates `/ios` and `/android`.
+
+- **iOS:** macOS with Xcode 26.4+; `pnpm ios` builds into the simulator (or a connected device).
+- **Android:** Android Studio + Android SDK 36; `pnpm android` builds into an emulator or USB device.
+
+If you later need hand-edited native code, make the edits in `/ios`/`/android` and stop re-running prebuild over them (or move changes into config plugins).
+
+### EAS Build (CI / store-ready artifacts)
+
+```bash
+pnpm dlx eas-cli login
+pnpm dlx eas-cli build --platform ios --profile production    # .ipa
+pnpm dlx eas-cli build --platform android --profile production # .aab
+```
+
+Requires an [EAS](https://expo.dev/eas) account and the usual Apple/Google signing credentials. EAS also handles `eas submit` for store uploads and `eas update` for JS-only over-the-air updates.
 
 ## Learn more
 
-To learn more about developing your project with Expo, look at the following resources:
-
-- [Expo documentation](https://docs.expo.dev/): Learn fundamentals, or go into advanced topics with our [guides](https://docs.expo.dev/guides).
-- [Learn Expo tutorial](https://docs.expo.dev/tutorial/introduction/): Follow a step-by-step tutorial where you'll create a project that runs on Android, iOS, and the web.
-
-## Join the community
-
-Join our community of developers creating universal apps.
-
-- [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
-- [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
+- [Expo documentation (SDK 57)](https://docs.expo.dev/versions/v57.0.0/)
+- [expo-router](https://docs.expo.dev/router/introduction)
+- [React Native docs](https://reactnative.dev/docs/getting-started)
