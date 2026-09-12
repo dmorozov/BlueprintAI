@@ -1,3 +1,4 @@
+import { useRouter } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Pressable, StyleSheet, Text } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -12,8 +13,13 @@ const TOAST_DURATION_MS = 2000;
 
 export function HomeScreen() {
   const theme = useTheme();
+  const router = useRouter();
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const handleCreateBlueprint = useCallback(() => {
+    router.push('/capture');
+  }, [router]);
 
   const showToast = useCallback((message: string) => {
     setToastMessage(message);
@@ -45,9 +51,18 @@ export function HomeScreen() {
           React Native · Expo · TypeScript
         </ThemedText>
 
+        <ThemedText
+          variant="small"
+          themeColor="textSecondary"
+          style={styles.hint}
+        >
+          Point your camera at a room, take a few photos from different angles,
+          and get a floor plan.
+        </ThemedText>
+
         <Pressable
           accessibilityRole="button"
-          onPress={() => showToast('Test clicked!')}
+          onPress={handleCreateBlueprint}
           style={({ pressed }) => [
             {
               backgroundColor: theme.primary,
@@ -58,7 +73,27 @@ export function HomeScreen() {
             pressed && styles.buttonPressed,
           ]}
         >
-          <Text style={styles.buttonLabel}>Test</Text>
+          <Text style={styles.buttonLabel}>Create blueprint from photos</Text>
+        </Pressable>
+
+        <Pressable
+          accessibilityRole="button"
+          onPress={() => showToast('Test clicked!')}
+          style={({ pressed }) => [
+            {
+              backgroundColor: theme.backgroundElement,
+              borderRadius: 999,
+              paddingHorizontal: Spacing.four,
+              paddingVertical: Spacing.two,
+            },
+            pressed && styles.buttonPressed,
+          ]}
+        >
+          <Text
+            style={[styles.buttonLabel, { color: theme.text, fontSize: 14 }]}
+          >
+            Test
+          </Text>
         </Pressable>
       </SafeAreaView>
 
@@ -82,7 +117,11 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   tagline: {
-    marginBottom: Spacing.six,
+    marginBottom: Spacing.three,
+  },
+  hint: {
+    textAlign: 'center',
+    marginBottom: Spacing.two,
   },
   buttonPressed: {
     opacity: 0.8,
