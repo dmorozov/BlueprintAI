@@ -31,10 +31,10 @@ export function HomeScreen() {
   return (
     <ThemedView style={styles.container}>
       <SafeAreaView style={styles.safeArea}>
-        <ThemedText type="title" style={styles.title}>
+        <ThemedText variant="title" style={styles.title}>
           BlueprintAI
         </ThemedText>
-        <ThemedText type="small" themeColor="textSecondary" style={styles.tagline}>
+        <ThemedText variant="small" themeColor="textSecondary" style={styles.tagline}>
           React Native · Expo · TypeScript
         </ThemedText>
 

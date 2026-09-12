@@ -1,10 +1,19 @@
-import { useEffect, useRef } from 'react';
-import { Animated, Easing, Platform, StyleSheet, Text, View } from 'react-native';
+import { useEffect, useMemo } from 'react';
+import { Animated, Easing, Platform, StyleSheet, Text, View, type ViewStyle } from 'react-native';
 
 type ToastBubbleProps = {
   /** Text to display; pass `null` to hide the bubble. */
   message: string | null;
 };
+
+/** Spring parameters for the entrance animation. */
+const SPRING_IN = { friction: 7, tension: 80 } as const;
+
+/** Duration of the fade-out animation in milliseconds. */
+const FADE_OUT_MS = 200;
+
+/** Distance the bubble slides up from while animating in, in logical pixels. */
+const SLIDE_DISTANCE = 16;
 
 /**
  * A lightweight notification bubble ("toast") that springs in at the bottom of
@@ -12,35 +21,39 @@ type ToastBubbleProps = {
  * so it behaves identically on Android, iOS, and web.
  */
 export function ToastBubble({ message }: ToastBubbleProps) {
-  const progress = useRef(new Animated.Value(0)).current;
+  // Memoized rather than stored in a ref: the value must keep its identity
+  // across renders so an in-flight animation is never restarted.
+  const progress = useMemo(() => new Animated.Value(0), []);
 
   useEffect(() => {
     if (message !== null) {
       Animated.spring(progress, {
+        ...SPRING_IN,
         toValue: 1,
-        friction: 7,
-        tension: 80,
         useNativeDriver: true,
       }).start();
     } else {
       Animated.timing(progress, {
         toValue: 0,
-        duration: 200,
+        duration: FADE_OUT_MS,
         easing: Easing.out(Easing.quad),
         useNativeDriver: true,
       }).start();
     }
   }, [message, progress]);
 
-  const translateY = progress.interpolate({ inputRange: [0, 1], outputRange: [16, 0] });
-  const shadow =
+  const translateY = progress.interpolate({
+    inputRange: [0, 1],
+    outputRange: [SLIDE_DISTANCE, 0],
+  });
+  const shadowStyle: ViewStyle | undefined =
     Platform.OS === 'android' ? styles.androidShadow : Platform.OS === 'ios' ? styles.iosShadow : undefined;
 
   return (
     <View pointerEvents="none" style={styles.container}>
       <Animated.View
         accessibilityRole="alert"
-        style={[styles.bubble, shadow, { opacity: progress, transform: [{ translateY }] }]}
+        style={[styles.bubble, shadowStyle, { opacity: progress, transform: [{ translateY }] }]}
       >
         <Text style={styles.text}>{message ?? ''}</Text>
       </Animated.View>

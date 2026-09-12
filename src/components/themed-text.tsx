@@ -1,30 +1,32 @@
-import { Platform, StyleSheet, Text, type TextProps } from 'react-native';
+import { Platform, StyleSheet, Text, type TextProps, type TextStyle } from 'react-native';
 
 import { Fonts, ThemeColor } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 
+/** Visual presets for `ThemedText`. */
+export type ThemedTextVariant =
+  | 'default'
+  | 'title'
+  | 'small'
+  | 'smallBold'
+  | 'subtitle'
+  | 'link'
+  | 'linkPrimary'
+  | 'code';
+
 export type ThemedTextProps = TextProps & {
-  type?: 'default' | 'title' | 'small' | 'smallBold' | 'subtitle' | 'link' | 'linkPrimary' | 'code';
+  /** Visual preset applied on top of the base text styles. */
+  variant?: ThemedTextVariant;
+  /** Color token from the active palette. Defaults to `text`. */
   themeColor?: ThemeColor;
 };
 
-export function ThemedText({ style, type = 'default', themeColor, ...rest }: ThemedTextProps) {
+export function ThemedText({ style, variant = 'default', themeColor, ...rest }: ThemedTextProps) {
   const theme = useTheme();
 
   return (
     <Text
-      style={[
-        { color: theme[themeColor ?? 'text'] },
-        type === 'default' && styles.default,
-        type === 'title' && styles.title,
-        type === 'small' && styles.small,
-        type === 'smallBold' && styles.smallBold,
-        type === 'subtitle' && styles.subtitle,
-        type === 'link' && styles.link,
-        type === 'linkPrimary' && styles.linkPrimary,
-        type === 'code' && styles.code,
-        style,
-      ]}
+      style={[{ color: theme[themeColor ?? 'text'] }, variantStyles[variant], style]}
       {...rest}
     />
   );
@@ -71,3 +73,15 @@ const styles = StyleSheet.create({
     fontSize: 12,
   },
 });
+
+/** Style for each `ThemedTextVariant`, keyed exhaustively. */
+const variantStyles: Record<ThemedTextVariant, TextStyle> = {
+  default: styles.default,
+  title: styles.title,
+  small: styles.small,
+  smallBold: styles.smallBold,
+  subtitle: styles.subtitle,
+  link: styles.link,
+  linkPrimary: styles.linkPrimary,
+  code: styles.code,
+};
