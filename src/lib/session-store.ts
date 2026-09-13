@@ -7,14 +7,26 @@ import type { RoomPlacement } from '@/lib/plan-transform';
  * Everything lives here between screens for the lifetime of the app session
  * (cleared on reload — acceptable for a prototype; persistent storage is Phase 3).
  */
+/** How a room's stored plan was produced (null when it has no plan yet). */
+export type PlanSource = 'ar-tap' | 'photo-assist';
+
 interface RoomSession {
   label: string;
   photos: ProcessedPhoto[];
   plan: FloorPlan | null;
   /**
-   * Id of the AR session that measured this room's plan, when it was captured via
-   * tap-to-trace. Rooms sharing an id live in one tracking frame and can be merged
-   * into a combined plan without alignment. Null for photo/mock plans.
+   * How the stored plan was produced. 'ar-tap' = on-device AR tap-to-trace (real
+   * measurements); 'photo-assist' = self-hosted MoGe suggestions the user confirmed
+   * (auto-detected — verify). Null for mock-provider plans and rooms without a plan.
+   * Drives UI labeling: photo-assist plans must never be presented as AR-measured.
+   */
+  planSource: PlanSource | null;
+  /**
+   * Frame-group id of the room's stored plan. For 'ar-tap' plans this is the AR
+   * session that measured them — rooms sharing an id live in one tracking frame and
+   * can be merged into a combined plan without alignment. Photo-assist plans get a
+   * unique per-room id (each photo frame is unrelated to every other), so they join
+   * the combined blueprint only via manual alignment. Null for mock plans.
    */
   arSessionId: string | null;
   /**
@@ -32,6 +44,7 @@ export interface RoomSummary {
   label: string;
   photoCount: number;
   hasPlan: boolean;
+  planSource: PlanSource | null;
   arSessionId: string | null;
   createdAt: number;
 }
@@ -46,6 +59,7 @@ export function createRoom(label?: string): string {
     label: label !== undefined && label !== '' ? label : fallbackLabel,
     photos: [],
     plan: null,
+    planSource: null,
     arSessionId: null,
     placement: null,
     createdAt: Date.now(),
@@ -92,12 +106,30 @@ export function hasRoom(roomId: string): boolean {
   return roomId !== '' && rooms.has(roomId);
 }
 
-/** Stores (or clears, with null) the generated plan for a room. */
+/**
+ * Stores (or clears, with null) the generated plan for a room. Clearing the plan also
+ * clears its source — a source without a plan is meaningless. Storing a plan does NOT
+ * set the source; flows call setPlanSource explicitly so mock generations stay null.
+ */
 export function setPlan(roomId: string, plan: FloorPlan | null): void {
   const room = rooms.get(roomId);
   if (room !== undefined) {
     room.plan = plan;
+    if (plan === null) room.planSource = null;
   }
+}
+
+/** Records how the room's stored plan was produced (no-op for unknown rooms). */
+export function setPlanSource(roomId: string, source: PlanSource | null): void {
+  const room = rooms.get(roomId);
+  if (room !== undefined) {
+    room.planSource = source;
+  }
+}
+
+/** How the room's stored plan was produced, or null (mock / no plan). */
+export function getPlanSource(roomId: string): PlanSource | null {
+  return rooms.get(roomId)?.planSource ?? null;
 }
 
 /** The room's stored plan, or null when none has been generated yet. */
@@ -113,7 +145,11 @@ export function setArSession(roomId: string, arSessionId: string): void {
   }
 }
 
-/** The AR session id that measured the room's plan, or null when not AR-measured. */
+/**
+ * The frame-group id of the room's stored plan, or null when it has none (mock plans
+ * and unmeasured rooms). Non-null for both AR-measured and photo-assist plans — use
+ * getPlanSource to tell them apart.
+ */
 export function getArSession(roomId: string): string | null {
   return rooms.get(roomId)?.arSessionId ?? null;
 }
@@ -143,6 +179,7 @@ export function listRooms(): RoomSummary[] {
       label: room.label,
       photoCount: room.photos.length,
       hasPlan: room.plan !== null,
+      planSource: room.planSource,
       arSessionId: room.arSessionId,
       createdAt: room.createdAt,
     });

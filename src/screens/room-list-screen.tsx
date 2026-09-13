@@ -41,14 +41,15 @@ export function RoomListScreen() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const rooms = useMemo(() => listRooms(), [version]);
 
-  // Any two AR-measured rooms can be combined: same-session rooms auto-align
-  // (shared tracking frame), rooms from different sessions are nudged into place.
-  const arMeasuredCount = useMemo(
+  // Any two rooms with a plan in their own frame can be combined: same-AR-session
+  // rooms auto-align (shared tracking frame), everything else — including each
+  // photo-assist room, which gets its own frame id — is nudged into place.
+  const combinableCount = useMemo(
     () =>
       rooms.filter((room) => room.hasPlan && room.arSessionId !== null).length,
     [rooms],
   );
-  const canCombine = arMeasuredCount >= 2;
+  const canCombine = combinableCount >= 2;
 
   const refresh = useCallback(() => setVersion((v) => v + 1), []);
 
@@ -127,8 +128,8 @@ export function RoomListScreen() {
         >
           <Text style={[styles.buttonLabel, { color: theme.text }]}>
             {canCombine
-              ? `Combine ${arMeasuredCount} measured rooms`
-              : 'Combine needs 2+ AR-measured rooms'}
+              ? `Combine ${combinableCount} room plans`
+              : 'Combine needs 2+ rooms with plans'}
           </Text>
         </Pressable>
       </View>
@@ -153,9 +154,11 @@ export function RoomListScreen() {
               <ThemedText variant="small" themeColor="textSecondary">
                 {room.photoCount} photo{room.photoCount === 1 ? '' : 's'} ·{' '}
                 {room.hasPlan
-                  ? room.arSessionId !== null
+                  ? room.planSource === 'ar-tap'
                     ? 'AR-measured plan'
-                    : 'plan ready'
+                    : room.planSource === 'photo-assist'
+                      ? 'photo-assisted plan — verify'
+                      : 'plan ready'
                   : 'no plan yet'}
               </ThemedText>
             </Pressable>

@@ -35,6 +35,7 @@ import {
   removePhoto,
   setArSession,
   setPlan as saveRoomPlan,
+  setPlanSource,
 } from '@/lib/session-store';
 
 // Corner marker material (ViroReact geometry takes materials by registered name).
@@ -281,6 +282,8 @@ export function ArCaptureScreen() {
       const plan = sessionRef.current!.finishRoom(roomName);
       saveRoomPlan(roomId, plan);
       setArSession(roomId, arSessionId);
+      // Real tap measurements — the UI must never present this as mock or assisted.
+      setPlanSource(roomId, 'ar-tap');
       setPhase('finished');
     } catch (error) {
       showToast(

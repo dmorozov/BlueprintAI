@@ -8,6 +8,7 @@ import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
+import { isPhotoAssistConfigured } from '@/lib/photo-assist-client';
 
 const TOAST_DURATION_MS = 2000;
 
@@ -17,8 +18,16 @@ export function HomeScreen() {
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // Photo assist (plan Phase 2) is feature-flagged: it only appears when the operator
+  // has configured a self-hosted MoGe service via EXPO_PUBLIC_PHOTO_ASSIST_URL.
+  const photoAssistAvailable = isPhotoAssistConfigured();
+
   const handleCreateBlueprint = useCallback(() => {
     router.push('/ar-capture');
+  }, [router]);
+
+  const handlePhotoAssist = useCallback(() => {
+    router.push('/photo-assist');
   }, [router]);
 
   const showToast = useCallback((message: string) => {
@@ -75,6 +84,28 @@ export function HomeScreen() {
         >
           <Text style={styles.buttonLabel}>Measure room with AR</Text>
         </Pressable>
+
+        {photoAssistAvailable && (
+          <Pressable
+            accessibilityRole="button"
+            onPress={handlePhotoAssist}
+            style={({ pressed }) => [
+              {
+                backgroundColor: theme.backgroundElement,
+                borderRadius: 999,
+                paddingHorizontal: Spacing.four,
+                paddingVertical: Spacing.two,
+              },
+              pressed && styles.buttonPressed,
+            ]}
+          >
+            <Text
+              style={[styles.buttonLabel, { color: theme.text, fontSize: 14 }]}
+            >
+              Photo assist (self-hosted)
+            </Text>
+          </Pressable>
+        )}
 
         <Pressable
           accessibilityRole="button"

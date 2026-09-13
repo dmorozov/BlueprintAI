@@ -74,6 +74,23 @@ app.json                # Expo config: name, slug, scheme, icons, plugins
 
 The single home screen shows the app title and a **Test** button. Tapping it shows a notification bubble with the text **"Test clicked!"** — implemented as `ToastBubble`, a pure React Native component (spring in, auto-dismiss after 2 s) so it behaves identically on Android, iOS, and web without any native dependency.
 
+## Photo assist (self-hosted, optional)
+
+For rooms that can't be walked in AR, an optional photo-based path runs **MoGe-2**
+(MIT) on **your own GPU** to propose candidate walls — no third-party API is ever
+called. It lives outside the app in [`services/photo-assist/`](services/photo-assist/README.md)
+(FastAPI + Dockerfile + CPU-only tests). The app feature is feature-flagged and hidden
+until you point it at your service:
+
+```bash
+EXPO_PUBLIC_PHOTO_ASSIST_URL=http://192.168.1.42:8734   # .env, then rebuild/restart
+```
+
+Suggested walls are capped at `confidence ≤ 0.5`, labeled "auto-detected — verify", and
+each assisted room gets its own frame id, so it joins the combined blueprint through the
+align editor — never by auto-merge. See the service README for assumptions (level
+camera, per-photo frames) and deployment.
+
 ## Building native apps
 
 ### Local builds (CNG — Continuous Native Generation)

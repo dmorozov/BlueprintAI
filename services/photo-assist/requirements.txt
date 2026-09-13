@@ -1,0 +1,32 @@
+# BlueprintAI photo-assist service (Python 3.10–3.12; MoGe requires >= 3.10).
+#
+# Install in two steps (see README.md):
+#   pip install -r requirements.txt
+#   pip install --no-deps git+https://github.com/microsoft/MoGe.git@b942f00bdc2a
+#
+# MoGe is installed with --no-deps on purpose: its pyproject pulls demo-only extras
+# (gradio, matplotlib, trimesh) and — at newer commits — FlexGEMM/Triton builds that
+# are unnecessary for the `moge.model.v2` inference path used here. Its real runtime
+# dependencies are declared explicitly below.
+
+fastapi>=0.115
+uvicorn[standard]>=0.30
+pydantic>=2.7
+
+# Geometry / image handling (wall_fitting is numpy-only; pillow decodes uploads)
+numpy>=1.26
+pillow>=10.0
+
+# MoGe-2 runtime dependencies
+torch>=2.4
+torchvision>=0.19
+huggingface_hub>=0.23
+scipy>=1.10
+opencv-python-headless>=4.8
+tqdm
+utils3d @ git+https://github.com/EasternJournalist/utils3d.git@3fab839f0be9931dac7c8488eb0e1600c236e183
+pipeline @ git+https://github.com/EasternJournalist/pipeline.git@866f059d2a05cde05e4a52211ec5051fd5f276d6
+
+# Tests (CPU-only; the fitting logic and API contract are tested without torch/GPU)
+pytest>=8.0
+httpx>=0.27
