@@ -10,6 +10,8 @@ interface PhotoStripProps {
   onRemove: (key: string) => void;
   /** Disables the remove buttons (e.g. while a capture is being processed). */
   disabled?: boolean;
+  /** When false, hides the per-photo remove buttons entirely (view-only mode). */
+  removable?: boolean;
 }
 
 const THUMBNAIL_SIZE = 72;
@@ -19,6 +21,7 @@ export function PhotoStrip({
   photos,
   onRemove,
   disabled = false,
+  removable = true,
 }: PhotoStripProps) {
   const theme = useTheme();
 
@@ -39,19 +42,23 @@ export function PhotoStrip({
               contentFit="cover"
               transition={150}
             />
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={`Remove photo ${photo.key}`}
-              disabled={disabled}
-              onPress={() => onRemove(photo.key)}
-              style={({ pressed }) => [
-                styles.removeButton,
-                { backgroundColor: theme.backgroundElement },
-                (pressed || disabled) && styles.pressed,
-              ]}
-            >
-              <Text style={[styles.removeLabel, { color: theme.text }]}>×</Text>
-            </Pressable>
+            {removable && (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={`Remove photo ${photo.key}`}
+                disabled={disabled}
+                onPress={() => onRemove(photo.key)}
+                style={({ pressed }) => [
+                  styles.removeButton,
+                  { backgroundColor: theme.backgroundElement },
+                  (pressed || disabled) && styles.pressed,
+                ]}
+              >
+                <Text style={[styles.removeLabel, { color: theme.text }]}>
+                  ×
+                </Text>
+              </Pressable>
+            )}
           </View>
         ))}
       </ScrollView>

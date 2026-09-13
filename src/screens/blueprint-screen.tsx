@@ -11,6 +11,7 @@ import {
 } from 'react-native';
 
 import { BlueprintSvg } from '@/components/blueprint-svg';
+import { PhotoStrip } from '@/components/photo-strip';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Spacing } from '@/constants/theme';
@@ -473,6 +474,15 @@ export function BlueprintScreen() {
           >
             <BlueprintSvg plan={plan ?? emptyPlan} />
           </View>
+          {/* Reference photos (AR capture) or captured photos — shown for the user's
+              records; they never feed a plan in the no-external-API flow. */}
+          {photos.length > 0 && (
+            <PhotoStrip
+              photos={photos}
+              onRemove={() => undefined}
+              removable={false}
+            />
+          )}
           {plan !== null && (
             <View style={styles.summary}>
               <ThemedText variant="small" themeColor="textSecondary">

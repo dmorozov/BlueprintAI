@@ -7,7 +7,8 @@ import {
   requestRequiredPermissions,
   type ViroARHitTestResult,
 } from '@reactvision/react-viro';
-import { useRouter } from 'expo-router';
+import { CameraView, useCameraPermissions } from 'expo-camera';
+import { useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
@@ -18,15 +19,20 @@ import {
   View,
 } from 'react-native';
 
+import { PhotoStrip } from '@/components/photo-strip';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { ToastBubble } from '@/components/toast-bubble';
 import { Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { ArCaptureSession, type ArTrackingQuality } from '@/lib/ar-capture';
+import { preparePhoto, type ProcessedPhoto } from '@/lib/image-pipeline';
 import {
+  addPhoto,
   createRoom,
+  getPhotos,
   getRoomLabel,
+  removePhoto,
   setArSession,
   setPlan as saveRoomPlan,
 } from '@/lib/session-store';
@@ -39,7 +45,13 @@ ViroMaterials.createMaterials({
 const TOAST_DURATION_MS = 2500;
 
 type Phase =
-  'checking' | 'unsupported' | 'denied' | 'error' | 'ready' | 'finished';
+  | 'checking'
+  | 'unsupported'
+  | 'denied'
+  | 'error'
+  | 'ready'
+  | 'photo'
+  | 'finished';
 type TapMode = 'corner' | 'opening';
 
 interface PendingOpening {
@@ -53,7 +65,10 @@ interface PendingOpening {
  * geometry and records a real-world position (meters). Consecutive corners become
  * walls with measured lengths; door/window taps add openings on the nearest wall.
  * Rooms captured consecutively share one tracking frame, so they combine later by
- * plain geometry union — no AI involved.
+ * plain geometry union — no AI involved. After finishing a room, optional reference
+ * photos (expo-camera) can be captured for the user's records; they never feed the
+ * plan. Taking them unmounts the AR scene, so the next room after a photo step gets
+ * a fresh tracking frame and its own session id (combined via the align editor).
  */
 export function ArCaptureScreen() {
   const theme = useTheme();
@@ -61,8 +76,9 @@ export function ArCaptureScreen() {
 
   const sessionRef = useRef<ArCaptureSession | null>(null);
   if (sessionRef.current === null) sessionRef.current = new ArCaptureSession();
-  // One AR tracking frame per screen visit; consecutive rooms stay aligned.
-  const [arSessionId] = useState(
+  // One AR tracking frame per screen visit; consecutive rooms stay aligned. The id
+  // rotates when the scene remounts after a reference-photo step (new tracking frame).
+  const [arSessionId, setArSessionId] = useState(
     () =>
       `ar-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
   );
@@ -91,6 +107,29 @@ export function ArCaptureScreen() {
   // The room id changes when the user starts the next room in the same AR session.
   const [roomId, setRoomId] = useState(() => createRoom());
   const [roomName, setRoomName] = useState(() => getRoomLabel(roomId) ?? '');
+
+  // --- reference-photo step (after finishing a room; for the user's records) ---
+  // The AR scene is unmounted in this phase so expo-camera exclusively owns the
+  // device camera. Photos go through the same pipeline as the old capture flow but
+  // never feed plan generation.
+  const [permission, requestPermission] = useCameraPermissions();
+  const cameraRef = useRef<CameraView | null>(null);
+  const [cameraReady, setCameraReady] = useState(false);
+  const [capturing, setCapturing] = useState(false);
+  const [photos, setPhotos] = useState<ProcessedPhoto[]>([]);
+  // Set when the preview fails to start (e.g. ARCore still releasing the camera).
+  const [cameraError, setCameraError] = useState<string | null>(null);
+  // Bumped on retry to force-remount the CameraView.
+  const [cameraAttempt, setCameraAttempt] = useState(0);
+  // The expo-camera docs require unmounting the preview when the screen is unfocused.
+  const [screenFocused, setScreenFocused] = useState(true);
+
+  useFocusEffect(
+    useCallback(() => {
+      setScreenFocused(true);
+      return () => setScreenFocused(false);
+    }, []),
+  );
 
   const sceneRef = useRef<ViroARScene | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
@@ -267,6 +306,85 @@ export function ArCaptureScreen() {
     router.push(`/blueprint?room=${roomId}`);
   }, [router, roomId]);
 
+  // --- reference-photo handlers -------------------------------------------------
+
+  // Callback ref: when the preview unmounts (blur / error) React passes null, which
+  // resets readiness so the shutter stays disabled until the camera is ready again.
+  const handleCameraRef = useCallback((instance: CameraView | null) => {
+    cameraRef.current = instance;
+    if (instance === null) setCameraReady(false);
+  }, []);
+
+  const handleReferencePhotos = useCallback(() => {
+    setPhotos(getPhotos(roomId));
+    setCameraReady(false);
+    setCameraError(null);
+    setPhase('photo');
+  }, [roomId]);
+
+  const handlePhotoCapture = useCallback(async () => {
+    if (!cameraReady || capturing) return;
+    setCapturing(true);
+    try {
+      const camera = cameraRef.current;
+      if (camera === null) return;
+      // exif: false keeps GPS/EXIF out of the record photos (same as capture flow).
+      const picture = await camera.takePictureAsync({
+        quality: 0.85,
+        exif: false,
+      });
+      const photo = await preparePhoto(
+        picture,
+        `photo-${Date.now().toString(36)}-${Math.random()
+          .toString(36)
+          .slice(2, 8)}`,
+      );
+      addPhoto(roomId, photo);
+      setPhotos((prev) => [...prev, photo]);
+    } catch (error) {
+      showToast(
+        error instanceof Error ? error.message : 'Failed to capture the photo.',
+      );
+    } finally {
+      setCapturing(false);
+    }
+  }, [cameraReady, capturing, roomId, showToast]);
+
+  const handleRemovePhoto = useCallback(
+    (key: string) => {
+      removePhoto(roomId, key);
+      setPhotos((prev) => prev.filter((photo) => photo.key !== key));
+    },
+    [roomId],
+  );
+
+  const handleRetryCamera = useCallback(() => {
+    setCameraError(null);
+    setCameraAttempt((attempt) => attempt + 1);
+  }, []);
+
+  // Leaving the photo step remounts the AR scene with a fresh tracking frame, so the
+  // next room gets a new session id and joins via the align editor (the old frame is
+  // gone — auto-alignment across this boundary would be invalid).
+  const handlePhotoNextRoom = useCallback(() => {
+    setArSessionId(
+      `ar-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
+    );
+    sessionRef.current!.clear();
+    setPendingOpening(null);
+    setMode('corner');
+    const newId = createRoom();
+    setRoomId(newId);
+    setRoomName(getRoomLabel(newId) ?? '');
+    syncCorners();
+    setPhotos([]);
+    setPhase('ready');
+  }, [syncCorners]);
+
+  const handlePhotoDone = useCallback(() => {
+    router.push(`/blueprint?room=${roomId}`);
+  }, [router, roomId]);
+
   if (phase === 'checking') {
     return (
       <ThemedView style={styles.center}>
@@ -297,6 +415,131 @@ export function ArCaptureScreen() {
         >
           <Text style={styles.buttonLabel}>Go back</Text>
         </Pressable>
+      </ThemedView>
+    );
+  }
+
+  if (phase === 'photo') {
+    // The AR scene is unmounted here, so the expo-camera preview can own the camera.
+    const cameraActive =
+      screenFocused && permission?.granted === true && cameraError === null;
+    return (
+      <ThemedView style={styles.container}>
+        <View style={styles.cameraArea}>
+          {cameraActive ? (
+            <CameraView
+              key={cameraAttempt}
+              ref={handleCameraRef}
+              style={StyleSheet.absoluteFill}
+              facing="back"
+              mode="picture"
+              onCameraReady={() => setCameraReady(true)}
+              onMountError={(event) => setCameraError(event.message)}
+            />
+          ) : (
+            <View
+              style={[
+                styles.placeholder,
+                { backgroundColor: theme.backgroundElement },
+              ]}
+            >
+              {cameraError !== null ? (
+                <>
+                  <ThemedText variant="small" themeColor="textSecondary">
+                    Camera could not start: {cameraError}
+                  </ThemedText>
+                  <Pressable
+                    accessibilityRole="button"
+                    onPress={handleRetryCamera}
+                    style={({ pressed }) => [
+                      styles.primaryButton,
+                      { backgroundColor: theme.primary },
+                      pressed && styles.pressed,
+                    ]}
+                  >
+                    <Text style={styles.buttonLabel}>Retry camera</Text>
+                  </Pressable>
+                </>
+              ) : permission?.granted === false ? (
+                <>
+                  <ThemedText variant="small" themeColor="textSecondary">
+                    Camera access is needed for reference photos.
+                  </ThemedText>
+                  <Pressable
+                    accessibilityRole="button"
+                    onPress={() => void requestPermission()}
+                    style={({ pressed }) => [
+                      styles.primaryButton,
+                      { backgroundColor: theme.primary },
+                      pressed && styles.pressed,
+                    ]}
+                  >
+                    <Text style={styles.buttonLabel}>Grant camera access</Text>
+                  </Pressable>
+                </>
+              ) : (
+                <ActivityIndicator />
+              )}
+            </View>
+          )}
+        </View>
+
+        {photos.length > 0 && (
+          <PhotoStrip
+            photos={photos}
+            onRemove={handleRemovePhoto}
+            disabled={capturing}
+          />
+        )}
+
+        <View
+          style={[styles.photoFooter, { backgroundColor: theme.background }]}
+        >
+          <ThemedText variant="small" themeColor="textSecondary">
+            Reference photos for your records — they do not change the measured
+            plan.
+          </ThemedText>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Take reference photo"
+            disabled={!cameraReady || capturing}
+            onPress={() => void handlePhotoCapture()}
+            style={({ pressed }) => [
+              styles.shutter,
+              { borderColor: theme.text },
+              (!cameraReady || capturing) && styles.disabled,
+              pressed && styles.pressed,
+            ]}
+          />
+          <View style={styles.row}>
+            <Pressable
+              accessibilityRole="button"
+              onPress={handlePhotoNextRoom}
+              style={({ pressed }) => [
+                styles.primaryButton,
+                { backgroundColor: theme.primary },
+                pressed && styles.pressed,
+              ]}
+            >
+              <Text style={styles.buttonLabel}>Next room (new AR session)</Text>
+            </Pressable>
+            <Pressable
+              accessibilityRole="button"
+              onPress={handlePhotoDone}
+              style={({ pressed }) => [
+                styles.secondaryButton,
+                { backgroundColor: theme.backgroundElement },
+                pressed && styles.pressed,
+              ]}
+            >
+              <Text style={[styles.buttonLabel, { color: theme.text }]}>
+                Done
+              </Text>
+            </Pressable>
+          </View>
+        </View>
+
+        <ToastBubble message={toastMessage} />
       </ThemedView>
     );
   }
@@ -458,6 +701,19 @@ export function ArCaptureScreen() {
             </Pressable>
             <Pressable
               accessibilityRole="button"
+              onPress={handleReferencePhotos}
+              style={({ pressed }) => [
+                styles.secondaryButton,
+                { backgroundColor: theme.backgroundElement },
+                pressed && styles.pressed,
+              ]}
+            >
+              <Text style={[styles.buttonLabel, { color: theme.text }]}>
+                Reference photos
+              </Text>
+            </Pressable>
+            <Pressable
+              accessibilityRole="button"
               onPress={handleDone}
               style={({ pressed }) => [
                 styles.secondaryButton,
@@ -584,6 +840,28 @@ const styles = StyleSheet.create({
   },
   arArea: {
     flex: 1,
+  },
+  cameraArea: {
+    flex: 1,
+  },
+  placeholder: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: Spacing.three,
+    paddingHorizontal: Spacing.four,
+  },
+  photoFooter: {
+    alignItems: 'center',
+    gap: Spacing.two,
+    padding: Spacing.three,
+  },
+  shutter: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    borderWidth: 4,
+    backgroundColor: 'transparent',
   },
   trackingBadge: {
     position: 'absolute',
