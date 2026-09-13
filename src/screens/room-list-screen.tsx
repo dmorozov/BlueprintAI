@@ -1,5 +1,5 @@
-import { useRouter } from 'expo-router';
-import { useCallback, useMemo, useState } from 'react';
+import { useNavigation, useRouter } from 'expo-router';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Alert,
   Pressable,
@@ -13,37 +13,48 @@ import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
-import {
-  createRoom,
-  deleteRoom,
-  listRooms,
-  type RoomSummary,
-} from '@/lib/session-store';
+import { deleteRoom, listRooms, type RoomSummary } from '@/lib/session-store';
 
 /**
  * Room list: every captured room with its photo count and plan status. Tapping a card
  * opens its blueprint (when generated) or the capture screen; per-card actions add more
- * photos or delete the room. The combined-blueprint button assembles all rooms with
- * photos into one layout.
+ * photos or delete the room. "New room" starts AR tap-to-trace measurement; the
+ * combine button merges all AR-measured rooms — same-session rooms auto-align,
+ * cross-session rooms via their saved manual alignment (align editor).
  */
 export function RoomListScreen() {
   const theme = useTheme();
   const router = useRouter();
-  // Bumped after store mutations to recompute the list.
+  const navigation = useNavigation();
+  // Bumped after store mutations and on every focus so the list re-reads the
+  // in-memory session store (e.g. after returning from AR capture, which creates
+  // new rooms). Stack screens stay mounted, so memos need this explicit refresh.
   const [version, setVersion] = useState(0);
+  useEffect(() => {
+    const unsubscribe = navigation.addListener('focus', () => {
+      setVersion((v) => v + 1);
+    });
+    return unsubscribe;
+  }, [navigation]);
   // `version` is intentional: it forces a re-read of the in-memory session store after
   // mutations (react-hooks/exhaustive-deps cannot see module stores).
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const rooms = useMemo(() => listRooms(), [version]);
 
-  const roomsWithPhotos = rooms.filter((room) => room.photoCount > 0).length;
-  const canCombine = roomsWithPhotos >= 2;
+  // Any two AR-measured rooms can be combined: same-session rooms auto-align
+  // (shared tracking frame), rooms from different sessions are nudged into place.
+  const arMeasuredCount = useMemo(
+    () =>
+      rooms.filter((room) => room.hasPlan && room.arSessionId !== null).length,
+    [rooms],
+  );
+  const canCombine = arMeasuredCount >= 2;
 
   const refresh = useCallback(() => setVersion((v) => v + 1), []);
 
+  // The AR screen creates its own room session, so no pre-creation here.
   const handleNewRoom = useCallback(() => {
-    const id = createRoom();
-    router.push(`/capture?room=${id}`);
+    router.push('/ar-capture');
   }, [router]);
 
   const handleOpen = useCallback(
@@ -116,8 +127,8 @@ export function RoomListScreen() {
         >
           <Text style={[styles.buttonLabel, { color: theme.text }]}>
             {canCombine
-              ? `Generate combined blueprint (${roomsWithPhotos} rooms)`
-              : 'Combined blueprint needs at least 2 rooms with photos'}
+              ? `Combine ${arMeasuredCount} measured rooms`
+              : 'Combine needs 2+ AR-measured rooms'}
           </Text>
         </Pressable>
       </View>
@@ -141,7 +152,11 @@ export function RoomListScreen() {
               <ThemedText variant="smallBold">{room.label}</ThemedText>
               <ThemedText variant="small" themeColor="textSecondary">
                 {room.photoCount} photo{room.photoCount === 1 ? '' : 's'} ·{' '}
-                {room.hasPlan ? 'plan ready' : 'no plan yet'}
+                {room.hasPlan
+                  ? room.arSessionId !== null
+                    ? 'AR-measured plan'
+                    : 'plan ready'
+                  : 'no plan yet'}
               </ThemedText>
             </Pressable>
             <View style={styles.cardActions}>

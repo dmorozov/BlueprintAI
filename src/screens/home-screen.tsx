@@ -18,7 +18,7 @@ export function HomeScreen() {
   const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const handleCreateBlueprint = useCallback(() => {
-    router.push('/capture');
+    router.push('/ar-capture');
   }, [router]);
 
   const showToast = useCallback((message: string) => {
@@ -56,8 +56,8 @@ export function HomeScreen() {
           themeColor="textSecondary"
           style={styles.hint}
         >
-          Point your camera at a room, take a few photos from different angles,
-          and get a floor plan.
+          Walk the room in AR and tap each wall corner — real measurements, no
+          cloud AI.
         </ThemedText>
 
         <Pressable
@@ -73,7 +73,27 @@ export function HomeScreen() {
             pressed && styles.buttonPressed,
           ]}
         >
-          <Text style={styles.buttonLabel}>Create blueprint from photos</Text>
+          <Text style={styles.buttonLabel}>Measure room with AR</Text>
+        </Pressable>
+
+        <Pressable
+          accessibilityRole="button"
+          onPress={() => router.push('/capture')}
+          style={({ pressed }) => [
+            {
+              backgroundColor: theme.backgroundElement,
+              borderRadius: 999,
+              paddingHorizontal: Spacing.four,
+              paddingVertical: Spacing.two,
+            },
+            pressed && styles.buttonPressed,
+          ]}
+        >
+          <Text
+            style={[styles.buttonLabel, { color: theme.text, fontSize: 14 }]}
+          >
+            Photos (mock plan)
+          </Text>
         </Pressable>
 
         <Pressable

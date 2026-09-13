@@ -1,5 +1,4 @@
 import {
-  floorPlanJsonSchema,
   planBounds,
   validateFloorPlan,
   type FloorPlan,
@@ -7,29 +6,23 @@ import {
 } from '@/lib/blueprint-schema';
 
 /**
- * AI providers for photo → floor plan.
+ * Floor-plan providers.
  *
- * Two implementations:
- * - `gemini` — Google Gemini's Interactions API (`POST /v1beta/interactions`) with
- *   structured JSON output; request/response shapes verified against the official docs
- *   and the first-party `@google/genai` SDK types (model name from the current pricing page).
- * - `mock` — local sample plans with simulated latency, so the full capture → analyze →
- *   render flow can be tested without an API key or network access.
+ * The Gemini cloud provider was removed per docs/research/floorplan-no-external-api-plan.md
+ * (Phase 1): real dimensions now come from on-device AR tap-to-trace capture
+ * (src/lib/ar-capture.ts), which produces the same FloorPlan shape directly — measured,
+ * not estimated. No external API calls remain in the app.
  *
- * Selection: `EXPO_PUBLIC_AI_PROVIDER=mock|gemini` forces one; by default Gemini is used
- * when `EXPO_PUBLIC_GEMINI_API_KEY` is set and the mock otherwise. The active provider is
- * shown on the blueprint screen so mock results are never mistaken for real ones.
+ * The `mock` provider stays for UI development: local sample plans with simulated
+ * latency let the full render/export flow be tested without a device in hand. It is
+ * also what the legacy photo flow (src/screens/capture-screen.tsx) generates — always
+ * labeled "Mock mode" in the UI so it is never mistaken for a real measurement.
  *
- * Prototype note: EXPO_PUBLIC_* values are inlined into the client bundle. That is fine
- * for a prototype; move the AI call behind a small backend proxy before any real
- * deployment (see docs/research/blueprint-from-photos.md, §5 risks).
+ * The FloorPlanProvider interface is kept as the seam where a future self-hosted
+ * photo-assist provider (plan Phase 2, e.g. MoGe on your own GPU) would plug in.
  */
 
-const GEMINI_API_URL =
-  'https://generativelanguage.googleapis.com/v1beta/interactions';
-const GEMINI_MODEL = 'gemini-3.8-flash';
-
-/** Raised for any AI-side failure with a user-presentable message. */
+/** Raised for any provider-side failure with a user-presentable message. */
 export class AiProviderError extends Error {}
 
 interface PhotoPayload {
@@ -48,194 +41,10 @@ export interface CombinedRoomInput {
 /** A floor plan source. Implementations must return schema-validated plans. */
 export interface FloorPlanProvider {
   /** Stable identifier, shown in the UI and useful for logs. */
-  readonly id: 'gemini' | 'mock';
+  readonly id: string;
   generateFloorPlan(photos: PhotoPayload[]): Promise<FloorPlan>;
   generateCombinedPlan(rooms: CombinedRoomInput[]): Promise<FloorPlan>;
 }
-
-function getApiKey(): string | null {
-  const key = process.env.EXPO_PUBLIC_GEMINI_API_KEY;
-  return key !== undefined && key !== '' ? key : null;
-}
-
-// ---------------------------------------------------------------------------
-// Gemini provider
-// ---------------------------------------------------------------------------
-
-type GeminiInputPart =
-  | { type: 'text'; text: string }
-  | { type: 'image'; data: string; mime_type: string };
-
-const SYSTEM_INSTRUCTION = [
-  'You are an architectural floor-plan extraction engine.',
-  'You receive photos of a single room (or a photo of a paper floor-plan drawing) taken from several angles.',
-  'Produce a top-down 2D floor plan as JSON that exactly matches the required schema.',
-  '',
-  'Coordinate system: meters. Origin at the top-left corner of the plan bounding box; x increases to the right, y increases downward. Round all coordinates to two decimals.',
-  '',
-  'walls: every wall segment of the room as a straight line between two endpoints. Split walls at corners and where doors or windows interrupt them. Keep the scale consistent across all elements.',
-  'rooms: one closed polygon per distinct room area; for a single-room capture produce exactly one polygon approximating the outer boundary, following the wall lines.',
-  'openings: every door and window. Associate each with a wall via wallId; positionT is the fractional distance along that wall from its "from" endpoint (0..1); widthM is the estimated width (typical interior door 0.8-0.9 m, window 0.6-1.5 m).',
-  'lengthM: estimated length of each wall in meters.',
-  '',
-  'Estimate real-world scale from common interior references (door height ~2 m, door width ~0.8-0.9 m, typical room proportions). All dimensions are estimates: set confidence per element (1.0 clearly visible, 0.5 inferred from context, <=0.3 guessed).',
-  'Only include elements you can see or strongly infer from the photos; never invent walls, doors, windows, or rooms that the images do not support.',
-  'If the input is a photo of a paper floor-plan drawing, transcribe the drawn walls, rooms, and openings into the same schema.',
-  'Use "notes" for anything ambiguous (assumptions, missing information, low-confidence areas).',
-].join('\n');
-
-const COMBINED_SYSTEM_INSTRUCTION = [
-  'You are an architectural floor-plan assembler.',
-  'You receive the extracted floor plans (JSON) of several rooms, plus up to a few reference photos per room.',
-  'Assemble them into ONE coherent combined floor plan as JSON that exactly matches the required schema.',
-  '',
-  'Rules:',
-  '- Use one consistent meter coordinate system for the whole layout (x right, y down).',
-  '- Align shared walls: where two rooms are adjacent, their common wall must be a single line at identical coordinates.',
-  '- Connect doorways between rooms where the photos or plans indicate them; keep every room polygon and its label.',
-  '- If you cannot determine how two rooms connect, place them with a small gap (0.3-0.5 m) and explain in notes.',
-  '- Preserve per-element confidence; lower it for geometry you had to guess during assembly.',
-].join('\n');
-
-/** Cost control: combined calls include at most this many photos per room. */
-const COMBINED_PHOTOS_PER_ROOM = 3;
-
-function buildUserPrompt(photoCount: number): string {
-  return `Here are ${photoCount} photo${photoCount === 1 ? '' : 's'} of the space. Extract its floor plan as JSON matching the required schema.`;
-}
-
-function buildCombinedPrompt(rooms: CombinedRoomInput[]): string {
-  const sections = rooms.map((room, index) => {
-    const planText =
-      room.plan !== null
-        ? JSON.stringify(room.plan)
-        : '(no per-room plan available — derive this room from its photos)';
-    return `Room ${index + 1} "${room.label}":\n${planText}`;
-  });
-  return [
-    `Assemble these ${rooms.length} rooms into one combined floor plan as JSON matching the required schema.`,
-    '',
-    sections.join('\n\n'),
-  ].join('\n');
-}
-
-function truncate(value: string, maxLength: number): string {
-  return value.length > maxLength ? `${value.slice(0, maxLength)}…` : value;
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
-
-interface GeminiInteractionResponse {
-  output_text?: string;
-  errors?: { message?: string }[];
-}
-
-/** Runs one Interactions API call with structured JSON output and validates it. */
-async function callGemini(
-  apiKey: string,
-  systemInstruction: string,
-  parts: GeminiInputPart[],
-): Promise<FloorPlan> {
-  let response: Response;
-  try {
-    response = await fetch(GEMINI_API_URL, {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        'x-goog-api-key': apiKey,
-      },
-      body: JSON.stringify({
-        model: GEMINI_MODEL,
-        system_instruction: systemInstruction,
-        input: parts,
-        response_format: {
-          type: 'text',
-          mime_type: 'application/json',
-          schema: floorPlanJsonSchema,
-        },
-      }),
-    });
-  } catch (error) {
-    throw new AiProviderError(
-      `Network error while contacting the AI service: ${errorMessage(error)}`,
-    );
-  }
-
-  if (!response.ok) {
-    const detail = await response.text().catch(() => '');
-    throw new AiProviderError(
-      `AI request failed with HTTP ${response.status}. ${truncate(detail, 300)}`.trim(),
-    );
-  }
-
-  const data = (await response.json()) as GeminiInteractionResponse;
-  const apiErrors = (data.errors ?? [])
-    .map((entry) => entry.message)
-    .filter((message): message is string => message !== undefined);
-  if (apiErrors.length > 0) {
-    throw new AiProviderError(
-      `AI service error: ${truncate(apiErrors.join(' | '), 300)}`,
-    );
-  }
-  if (typeof data.output_text !== 'string' || data.output_text.trim() === '') {
-    throw new AiProviderError(
-      'The AI service returned an empty response. Try again.',
-    );
-  }
-
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(data.output_text);
-  } catch {
-    throw new AiProviderError(
-      'The AI response was not valid JSON. Try again or retake the photos.',
-    );
-  }
-
-  return validateFloorPlan(parsed);
-}
-
-function requireApiKey(): string {
-  const apiKey = getApiKey();
-  if (apiKey === null) {
-    throw new AiProviderError(
-      'No Gemini API key configured. Add EXPO_PUBLIC_GEMINI_API_KEY to .env.local and restart the dev server — or set EXPO_PUBLIC_AI_PROVIDER=mock to test with a sample plan.',
-    );
-  }
-  return apiKey;
-}
-
-const geminiProvider: FloorPlanProvider = {
-  id: 'gemini',
-  async generateFloorPlan(photos) {
-    const parts: GeminiInputPart[] = [
-      { type: 'text', text: buildUserPrompt(photos.length) },
-      ...photos.map((photo) => ({
-        type: 'image' as const,
-        data: photo.base64,
-        mime_type: photo.mimeType,
-      })),
-    ];
-    return callGemini(requireApiKey(), SYSTEM_INSTRUCTION, parts);
-  },
-  async generateCombinedPlan(rooms) {
-    const parts: GeminiInputPart[] = [
-      { type: 'text', text: buildCombinedPrompt(rooms) },
-    ];
-    for (const room of rooms) {
-      for (const photo of room.photos.slice(0, COMBINED_PHOTOS_PER_ROOM)) {
-        parts.push({
-          type: 'image',
-          data: photo.base64,
-          mime_type: photo.mimeType,
-        });
-      }
-    }
-    return callGemini(requireApiKey(), COMBINED_SYSTEM_INSTRUCTION, parts);
-  },
-};
 
 // ---------------------------------------------------------------------------
 // Mock provider (keyless testing)
@@ -323,7 +132,7 @@ function buildMockPlan(photoCount: number): FloorPlan {
         confidence: 0.7,
       },
     ],
-    notes: `Mock floor plan generated locally for testing (analyzed ${photoCount} photo${photoCount === 1 ? '' : 's'}). Set EXPO_PUBLIC_GEMINI_API_KEY to use the real AI provider.`,
+    notes: `Mock floor plan generated locally for UI testing (analyzed ${photoCount} photo${photoCount === 1 ? '' : 's'}). Use "Measure room with AR" for real measured plans.`,
   });
 }
 
@@ -387,7 +196,7 @@ function buildMockCombinedPlan(rooms: CombinedRoomInput[]): FloorPlan {
     walls,
     rooms: roomsOut,
     openings,
-    notes: `Mock combined layout — ${rooms.length} room${rooms.length === 1 ? '' : 's'} placed side by side for testing. Set EXPO_PUBLIC_GEMINI_API_KEY to use the real AI assembler.`,
+    notes: `Mock combined layout — ${rooms.length} room${rooms.length === 1 ? '' : 's'} placed side by side for UI testing. Rooms measured in one AR session combine automatically (no AI).`,
   });
 }
 
@@ -414,19 +223,17 @@ const mockProvider: FloorPlanProvider = {
 // ---------------------------------------------------------------------------
 
 /**
- * Resolves the active provider. `EXPO_PUBLIC_AI_PROVIDER` forces one; otherwise Gemini
- * is used when a key is configured and the mock provider otherwise (so the full flow
- * works out of the box for testing).
+ * Resolves the active provider. Only the mock provider exists for now (the Gemini
+ * cloud provider was removed in favor of on-device AR capture); a self-hosted
+ * photo-assist provider may be added later per the no-external-API plan's Phase 2.
  */
 export function activeProvider(): FloorPlanProvider {
-  const forced = process.env.EXPO_PUBLIC_AI_PROVIDER;
-  if (forced === 'mock') return mockProvider;
-  if (forced === 'gemini') return geminiProvider;
-  return getApiKey() !== null ? geminiProvider : mockProvider;
+  return mockProvider;
 }
 
 /**
- * Generates a floor plan for one room's photos using the active provider.
+ * Generates a floor plan for one room's photos using the active provider (mock: a
+ * local sample plan — never derived from the photos).
  * Throws AiProviderError with a user-presentable message on any failure.
  */
 export async function generateFloorPlan(
@@ -436,7 +243,8 @@ export async function generateFloorPlan(
 }
 
 /**
- * Assembles several rooms into one combined floor plan using the active provider.
+ * Assembles several rooms into one combined floor plan using the active provider
+ * (mock: a local side-by-side layout).
  * Throws AiProviderError with a user-presentable message on any failure.
  */
 export async function generateCombinedPlan(
