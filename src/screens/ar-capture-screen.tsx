@@ -56,6 +56,13 @@ try {
 }
 
 const TOAST_DURATION_MS = 2500;
+/**
+ * A scene that has produced no tracking update at all after this long is treated as
+ * dead: on some Android 16 devices Viro's camera surface never binds to the ARCore
+ * session (upstream issue ReactVision/viro#499), so "Starting…" would otherwise last
+ * forever over a black preview.
+ */
+const STALL_TIMEOUT_MS = 10000;
 
 type Phase =
   | 'checking'
@@ -167,6 +174,16 @@ export function ArCaptureScreen() {
   );
 
   const sceneRef = useRef<ViroARScene | null>(null);
+  // Bumped by "Restart AR" to remount the scene: a fresh native view gets a fresh
+  // ARCore session and camera grab, which recovers the dead-preview / never-tracks
+  // state where no other UI exists to recover from.
+  const [sceneAttempt, setSceneAttempt] = useState(0);
+  // True once STALL_TIMEOUT_MS pass with zero tracking updates (dead session).
+  const [stalled, setStalled] = useState(false);
+  useEffect(() => {
+    const timer = setTimeout(() => setStalled(true), STALL_TIMEOUT_MS);
+    return () => clearTimeout(timer);
+  }, [sceneAttempt]);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -221,6 +238,8 @@ export function ArCaptureScreen() {
 
   const handleTrackingUpdated = useCallback((state: number) => {
     setTrackingState(state);
+    // Any tracking report — even "lost" — proves the session is alive.
+    setStalled(false);
   }, []);
 
   const qualityNow = useCallback((): ArTrackingQuality | null => {
@@ -238,7 +257,12 @@ export function ArCaptureScreen() {
       if (phase !== 'ready') return;
       const quality = qualityNow();
       if (quality === null) {
-        showToast('Tracking lost — move the phone slowly and try again.');
+        // A stalled session will not recover from motion — point at the restart.
+        showToast(
+          stalled
+            ? 'AR camera didn’t start — tap Restart AR.'
+            : 'Tracking lost — move the phone slowly and try again.',
+        );
         return;
       }
       const scene = sceneRef.current;
@@ -288,7 +312,7 @@ export function ArCaptureScreen() {
         });
       }
     },
-    [ensureRoom, phase, mode, qualityNow, showToast, syncCorners],
+    [stalled, ensureRoom, phase, mode, qualityNow, showToast, syncCorners],
   );
 
   const handleUndo = useCallback(() => {
@@ -310,6 +334,36 @@ export function ArCaptureScreen() {
     setPendingOpening(null);
     syncCorners();
   }, [syncCorners]);
+
+  // Recovery for a wedged AR session (dead camera preview / tracking that never
+  // starts): remount the scene so ARCore re-initializes from scratch. Corners are
+  // world positions in THIS session's frame, so a new frame invalidates them —
+  // confirm before throwing a trace away.
+  const handleRestartAr = useCallback(() => {
+    const restart = () => {
+      sessionRef.current!.clear();
+      setPendingOpening(null);
+      setMode('corner');
+      setTrackingState(null);
+      setStalled(false);
+      syncCorners();
+      setSceneAttempt((attempt) => attempt + 1);
+    };
+    if (cornerCount > 0) {
+      Alert.alert(
+        'Restart AR?',
+        `This discards the current trace (${cornerCount} corner${
+          cornerCount === 1 ? '' : 's'
+        }). Corners are tied to this session's camera position and cannot be reused after a restart.`,
+        [
+          { text: 'Keep tracing', style: 'cancel' },
+          { text: 'Restart', style: 'destructive', onPress: restart },
+        ],
+      );
+    } else {
+      restart();
+    }
+  }, [cornerCount, syncCorners]);
 
   const handleAddOpening = useCallback(() => {
     if (pendingOpening === null) return;
@@ -637,12 +691,17 @@ export function ArCaptureScreen() {
     );
   }
 
+  // "Starting…" (not "Tracking lost") while no update has arrived yet — the two
+  // states need different recovery advice, and contradicting labels made the dead
+  // session look like a user error.
   const trackingBadge =
-    trackingState === ViroTrackingStateConstants.TRACKING_NORMAL
-      ? 'Tracking good'
-      : trackingState === ViroTrackingStateConstants.TRACKING_LIMITED
-        ? 'Tracking limited — move slowly'
-        : 'Tracking lost';
+    trackingState === null
+      ? 'Starting AR…'
+      : trackingState === ViroTrackingStateConstants.TRACKING_NORMAL
+        ? 'Tracking good'
+        : trackingState === ViroTrackingStateConstants.TRACKING_LIMITED
+          ? 'Tracking limited — move slowly'
+          : 'Tracking lost';
 
   return (
     <ThemedView style={styles.container}>
@@ -656,11 +715,21 @@ export function ArCaptureScreen() {
          * src/lib/viro-interop.ts for details.
          */}
         <View style={StyleSheet.absoluteFill}>
+          {/* key remounts the native scene (fresh ARCore session) on Restart AR. */}
           <ViroARScene
+            key={sceneAttempt}
             ref={sceneRef}
             style={viroSafeStyle({ flex: 1 })}
             displayPointCloud={{ maxPoints: 800 }}
             onTrackingUpdated={handleTrackingUpdated}
+            onError={(event) => {
+              const message = event.nativeEvent?.error?.message;
+              showToast(
+                message
+                  ? `AR scene error: ${message}`
+                  : 'AR scene error — tap Restart AR below.',
+              );
+            }}
           >
             {cornerWorlds.map((position, index) => (
               <ViroSphere
@@ -696,6 +765,49 @@ export function ArCaptureScreen() {
             {trackingBadge}
           </ThemedText>
         </View>
+
+        {/* Centered guidance when the session is not usable. Three states: still
+            starting (brief), tracking reported but lost (recoverable by moving), and
+            stalled — no tracking report at all after STALL_TIMEOUT_MS, which on some
+            Android 16 devices means the AR camera never bound (Viro issue #499); that
+            one gets an explicit restart button. Taps pass through (box-none) except on
+            the button itself, so corner capture still works the moment it recovers. */}
+        {trackingState !== ViroTrackingStateConstants.TRACKING_NORMAL && (
+          <View
+            pointerEvents="box-none"
+            style={[
+              styles.trackingLostHint,
+              { backgroundColor: theme.backgroundElement },
+            ]}
+          >
+            {stalled ? (
+              <>
+                <ThemedText variant="small">
+                  AR camera didn’t start. This can happen on some Android 16
+                  devices — restart the session to try again.
+                </ThemedText>
+                <Pressable
+                  accessibilityRole="button"
+                  pointerEvents="auto"
+                  onPress={handleRestartAr}
+                  style={({ pressed }) => [
+                    styles.primaryButton,
+                    { backgroundColor: theme.primary },
+                    pressed && styles.pressed,
+                  ]}
+                >
+                  <Text style={styles.buttonLabel}>Restart AR</Text>
+                </Pressable>
+              </>
+            ) : (
+              <ThemedText variant="small">
+                {trackingState === null
+                  ? 'Starting AR tracking — move the phone slowly.'
+                  : 'Tracking lost — move the phone slowly, or tap Restart AR below.'}
+              </ThemedText>
+            )}
+          </View>
+        )}
 
         {pendingOpening !== null && (
           <View
@@ -924,11 +1036,32 @@ export function ArCaptureScreen() {
                 Clear
               </Text>
             </Pressable>
+            {/* Recovery escape hatch — visible exactly when the session is stuck
+                (dead preview / tracking that never starts or was lost). */}
+            {trackingState !== ViroTrackingStateConstants.TRACKING_NORMAL && (
+              <Pressable
+                accessibilityRole="button"
+                onPress={handleRestartAr}
+                style={({ pressed }) => [
+                  styles.chip,
+                  { backgroundColor: theme.backgroundElement },
+                  pressed && styles.pressed,
+                ]}
+              >
+                <Text style={[styles.chipLabel, { color: theme.text }]}>
+                  Restart AR
+                </Text>
+              </Pressable>
+            )}
           </View>
           <ThemedText variant="small" themeColor="textSecondary">
-            {mode === 'corner'
-              ? `Tap each wall corner in order (${cornerCount} so far).`
-              : 'Tap the position of a door or window on a wall.'}
+            {trackingState !== ViroTrackingStateConstants.TRACKING_NORMAL
+              ? stalled
+                ? 'AR camera didn’t start — tap Restart AR.'
+                : 'Tracking not active — move the phone slowly, or tap Restart AR.'
+              : mode === 'corner'
+                ? `Tap each wall corner in order (${cornerCount} so far).`
+                : 'Tap the position of a door or window on a wall.'}
           </ThemedText>
           <Pressable
             accessibilityRole="button"
@@ -995,6 +1128,16 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     paddingHorizontal: Spacing.three,
     paddingVertical: Spacing.one,
+  },
+  trackingLostHint: {
+    position: 'absolute',
+    top: '45%',
+    alignSelf: 'center',
+    borderRadius: 16,
+    gap: Spacing.two,
+    alignItems: 'center',
+    paddingHorizontal: Spacing.four,
+    paddingVertical: Spacing.three,
   },
   openingPanel: {
     position: 'absolute',
