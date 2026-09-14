@@ -37,6 +37,7 @@ import {
   setPlan as saveRoomPlan,
   setPlanSource,
 } from '@/lib/session-store';
+import { viroSafeStyle } from '@/lib/viro-interop';
 
 // Corner marker material (ViroReact geometry takes materials by registered name).
 // Guarded so a Viro version that throws here cannot break this module's evaluation —
@@ -563,21 +564,31 @@ export function ArCaptureScreen() {
   return (
     <ThemedView style={styles.container}>
       <View style={styles.arArea}>
-        <ViroARScene
-          ref={sceneRef}
-          style={StyleSheet.absoluteFill}
-          displayPointCloud={{ maxPoints: 800 }}
-          onTrackingUpdated={handleTrackingUpdated}
-        >
-          {cornerWorlds.map((position, index) => (
-            <ViroSphere
-              key={index}
-              radius={0.1}
-              position={[position[0], position[1] + 0.05, position[2]]}
-              materials={['cornerMarker']}
-            />
-          ))}
-        </ViroARScene>
+        {/*
+         * The absolute positioning lives on this plain RN wrapper, NOT on the
+         * ViroARScene: under RN 0.86 Fabric, Viro's legacy Android view managers
+         * receive style keys as top-level native props, and `position: 'absolute'`
+         * collides with Viro's 3D `position` prop (ReadableArray), crashing the
+         * view update with "String cannot be cast to ReadableArray". See
+         * src/lib/viro-interop.ts for details.
+         */}
+        <View style={StyleSheet.absoluteFill}>
+          <ViroARScene
+            ref={sceneRef}
+            style={viroSafeStyle({ flex: 1 })}
+            displayPointCloud={{ maxPoints: 800 }}
+            onTrackingUpdated={handleTrackingUpdated}
+          >
+            {cornerWorlds.map((position, index) => (
+              <ViroSphere
+                key={index}
+                radius={0.1}
+                position={[position[0], position[1] + 0.05, position[2]]}
+                materials={['cornerMarker']}
+              />
+            ))}
+          </ViroARScene>
+        </View>
 
         {/* Tap capture layer over the camera view. */}
         <Pressable
