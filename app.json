@@ -11,8 +11,6 @@
     "ios": {
       "icon": "./assets/expo.icon",
       "infoPlist": {
-        "NSPhotoLibraryUsageDescription": "Allow $(PRODUCT_NAME) to access your photos",
-        "NSPhotoLibraryAddUsageDescription": "Allow $(PRODUCT_NAME) to save photos",
         "NSCameraUsageDescription": "Allow $(PRODUCT_NAME) to use your camera",
         "NSMicrophoneUsageDescription": "Allow $(PRODUCT_NAME) to use your microphone"
       },
@@ -47,6 +45,13 @@
           "cameraPermission": "Allow BlueprintAI to take photos of your space",
           "recordAudioAndroid": false,
           "barcodeScannerEnabled": false
+        }
+      ],
+      [
+        "expo-media-library",
+        {
+          "photosPermission": "Allow $(PRODUCT_NAME) to access your photos",
+          "savePhotosPermission": "Allow $(PRODUCT_NAME) to save photos"
         }
       ],
       [

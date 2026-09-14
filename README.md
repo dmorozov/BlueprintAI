@@ -102,6 +102,23 @@ Expo generates the native projects on demand: the first `pnpm ios` or `pnpm andr
 
 If you later need hand-edited native code, make the edits in `/ios`/`/android` and stop re-running prebuild over them (or move changes into config plugins).
 
+### Troubleshooting: "Cannot find native module" / Viro errors at startup
+
+If the log shows `Cannot find native module 'ExpoMediaLibraryNext'`,
+`ViroMaterials: MaterialManager ... is not available!`, or route warnings like
+`Route "./ar-capture.tsx" is missing the required default export`, the installed app
+predates the current set of native dependencies — or you are running **Expo Go**, which
+never includes ViroReact. Rebuild the development client:
+
+```bash
+pnpm android    # re-runs prebuild and installs a fresh build on the connected device
+```
+
+Until then the app still starts: the AR route loads lazily and shows an explanatory
+message instead of crashing, and "Save image to gallery" reports that it is unavailable
+in this build. The photo-assist plugin in `app.json` also registers the Android media
+permissions a fresh build needs for gallery saving.
+
 ### EAS Build (CI / store-ready artifacts)
 
 ```bash

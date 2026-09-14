@@ -39,9 +39,15 @@ import {
 } from '@/lib/session-store';
 
 // Corner marker material (ViroReact geometry takes materials by registered name).
-ViroMaterials.createMaterials({
-  cornerMarker: { diffuseColor: '#FF5252' },
-});
+// Guarded so a Viro version that throws here cannot break this module's evaluation —
+// the /ar-capture route loads this screen lazily for exactly that reason.
+try {
+  ViroMaterials.createMaterials({
+    cornerMarker: { diffuseColor: '#FF5252' },
+  });
+} catch {
+  // Viro's native module is unavailable — the route's error boundary handles it.
+}
 
 const TOAST_DURATION_MS = 2500;
 
