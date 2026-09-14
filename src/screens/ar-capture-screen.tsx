@@ -1,5 +1,6 @@
 import {
   ViroARScene,
+  ViroARSceneNavigator,
   ViroMaterials,
   ViroSphere,
   ViroTrackingStateConstants,
@@ -9,10 +10,21 @@ import {
 } from '@reactvision/react-viro';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type RefObject,
+} from 'react';
 import {
   ActivityIndicator,
   Alert,
+  PixelRatio,
+  Platform,
   Pressable,
   StyleSheet,
   Text,
@@ -42,7 +54,7 @@ import {
   setPlan as saveRoomPlan,
   setPlanSource,
 } from '@/lib/session-store';
-import { viroSafeStyle } from '@/lib/viro-interop';
+import { viroHitTestPoint, viroSafeStyle } from '@/lib/viro-interop';
 
 // Corner marker material (ViroReact geometry takes materials by registered name).
 // Guarded so a Viro version that throws here cannot break this module's evaluation —
@@ -78,6 +90,57 @@ interface PendingOpening {
   world: [number, number, number];
   wallIndex: number;
 }
+
+/**
+ * Live screen state the tracing scene needs. ViroARSceneNavigator captures
+ * `initialScene` once at construction, so the scene must be a stable component; it
+ * reads everything that changes from this context (the navigator renders its scenes
+ * as ordinary React children, so context flows through it).
+ */
+interface TracingSceneState {
+  sceneRef: RefObject<ViroARScene | null>;
+  cornerWorlds: [number, number, number][];
+  onTrackingUpdated: (state: number) => void;
+  onSceneError: (message: string | undefined) => void;
+}
+
+const TracingSceneContext = createContext<TracingSceneState | null>(null);
+
+/**
+ * The AR scene mounted by the navigator: tracked world plus a marker per corner.
+ * Only ViroARSceneNavigator creates the AR engine (ARCore session, camera
+ * background); a ViroARScene rendered outside one is an empty view that never
+ * tracks — and its hit tests reject, because Viro resolves them via the navigator.
+ */
+function TracingScene() {
+  const state = useContext(TracingSceneContext);
+  if (state === null) {
+    throw new Error(
+      'TracingScene must be rendered inside TracingSceneContext.',
+    );
+  }
+  const { sceneRef, cornerWorlds, onTrackingUpdated, onSceneError } = state;
+  return (
+    <ViroARScene
+      ref={sceneRef}
+      style={viroSafeStyle({ flex: 1 })}
+      displayPointCloud={{ maxPoints: 800 }}
+      onTrackingUpdated={onTrackingUpdated}
+      onError={(event) => onSceneError(event.nativeEvent?.error?.message)}
+    >
+      {cornerWorlds.map((position, index) => (
+        <ViroSphere
+          key={index}
+          radius={0.1}
+          position={[position[0], position[1] + 0.05, position[2]]}
+          materials={['cornerMarker']}
+        />
+      ))}
+    </ViroARScene>
+  );
+}
+
+const TRACING_SCENE = { scene: TracingScene };
 
 /**
  * AR tap-to-trace capture (no-external-API plan, Phase 1). The user walks the room
@@ -173,8 +236,9 @@ export function ArCaptureScreen() {
     }, []),
   );
 
+  // Attached by TracingScene inside the navigator; AR hit tests go through it.
   const sceneRef = useRef<ViroARScene | null>(null);
-  // Bumped by "Restart AR" to remount the scene: a fresh native view gets a fresh
+  // Bumped by "Restart AR" to remount the navigator: a fresh AR engine gets a fresh
   // ARCore session and camera grab, which recovers the dead-preview / never-tracks
   // state where no other UI exists to recover from.
   const [sceneAttempt, setSceneAttempt] = useState(0);
@@ -242,6 +306,27 @@ export function ArCaptureScreen() {
     setStalled(false);
   }, []);
 
+  const handleSceneError = useCallback(
+    (message: string | undefined) => {
+      showToast(
+        message
+          ? `AR scene error: ${message}`
+          : 'AR scene error — tap Restart AR below.',
+      );
+    },
+    [showToast],
+  );
+
+  const tracingScene = useMemo<TracingSceneState>(
+    () => ({
+      sceneRef,
+      cornerWorlds,
+      onTrackingUpdated: handleTrackingUpdated,
+      onSceneError: handleSceneError,
+    }),
+    [cornerWorlds, handleTrackingUpdated, handleSceneError],
+  );
+
   const qualityNow = useCallback((): ArTrackingQuality | null => {
     if (trackingState === ViroTrackingStateConstants.TRACKING_NORMAL)
       return 'normal';
@@ -267,11 +352,16 @@ export function ArCaptureScreen() {
       }
       const scene = sceneRef.current;
       if (scene === null) return;
+      // Android's renderer hit-tests in physical pixels; RN locations are in dp.
+      const [x, y] = viroHitTestPoint(event.nativeEvent, {
+        os: Platform.OS,
+        pixelRatio: PixelRatio.get(),
+      });
       let results: ViroARHitTestResult[];
       try {
         results = (await scene.performARHitTestWithPoint(
-          event.nativeEvent.locationX,
-          event.nativeEvent.locationY,
+          x,
+          y,
         )) as ViroARHitTestResult[];
       } catch {
         showToast('Hit test failed — try again.');
@@ -707,39 +797,25 @@ export function ArCaptureScreen() {
     <ThemedView style={styles.container}>
       <View style={styles.arArea}>
         {/*
-         * The absolute positioning lives on this plain RN wrapper, NOT on the
-         * ViroARScene: under RN 0.86 Fabric, Viro's legacy Android view managers
+         * The absolute positioning lives on this plain RN wrapper, NOT on the Viro
+         * components: under RN 0.86 Fabric, Viro's legacy Android view managers
          * receive style keys as top-level native props, and `position: 'absolute'`
          * collides with Viro's 3D `position` prop (ReadableArray), crashing the
          * view update with "String cannot be cast to ReadableArray". See
          * src/lib/viro-interop.ts for details.
          */}
         <View style={StyleSheet.absoluteFill}>
-          {/* key remounts the native scene (fresh ARCore session) on Restart AR. */}
-          <ViroARScene
-            key={sceneAttempt}
-            ref={sceneRef}
-            style={viroSafeStyle({ flex: 1 })}
-            displayPointCloud={{ maxPoints: 800 }}
-            onTrackingUpdated={handleTrackingUpdated}
-            onError={(event) => {
-              const message = event.nativeEvent?.error?.message;
-              showToast(
-                message
-                  ? `AR scene error: ${message}`
-                  : 'AR scene error — tap Restart AR below.',
-              );
-            }}
-          >
-            {cornerWorlds.map((position, index) => (
-              <ViroSphere
-                key={index}
-                radius={0.1}
-                position={[position[0], position[1] + 0.05, position[2]]}
-                materials={['cornerMarker']}
-              />
-            ))}
-          </ViroARScene>
+          {/* key remounts the navigator — a fresh AR engine and ARCore session — on
+              Restart AR. provider="none" matches the Viro config plugin in app.json
+              (the navigator otherwise defaults to ReactVision cloud anchors). */}
+          <TracingSceneContext.Provider value={tracingScene}>
+            <ViroARSceneNavigator
+              key={sceneAttempt}
+              initialScene={TRACING_SCENE}
+              provider="none"
+              style={viroSafeStyle({ flex: 1 })}
+            />
+          </TracingSceneContext.Provider>
         </View>
 
         {/* Tap capture layer over the camera view. */}

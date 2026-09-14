@@ -40,3 +40,30 @@ export function viroSafeStyle(style?: StyleProp<ViewStyle>): ViewStyle {
   }
   return result as ViewStyle;
 }
+
+/**
+ * Converts a React Native touch location into the point that
+ * `ViroARScene.performARHitTestWithPoint` expects.
+ *
+ * On Android, Viro's bridge forwards `x`/`y` unscaled (as `int`s) into
+ * `ViroViewARCore.performARHitTest(Point)`, and the renderer hit-tests against
+ * ARCore's display geometry, which is set from the GL surface size in physical
+ * pixels. RN touch locations are density-independent, so without scaling every tap
+ * hit-tests a point pulled toward the top-left corner by the pixel ratio. Rounded
+ * because the native parameters are ints (the bridge would otherwise truncate).
+ *
+ * On iOS, UIKit/ARKit take view points, which already equal RN units, so the
+ * location passes through unchanged (not device-verified: Viro ships no iOS sources).
+ */
+export function viroHitTestPoint(
+  location: { locationX: number; locationY: number },
+  platform: { os: string; pixelRatio: number },
+): [number, number] {
+  if (platform.os !== 'android') {
+    return [location.locationX, location.locationY];
+  }
+  return [
+    Math.round(location.locationX * platform.pixelRatio),
+    Math.round(location.locationY * platform.pixelRatio),
+  ];
+}
