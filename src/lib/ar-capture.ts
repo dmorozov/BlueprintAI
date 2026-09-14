@@ -81,18 +81,36 @@ export class ArCaptureSession {
     return this.corners.map((corner) => corner.world);
   }
 
+  /** Number of openings recorded so far (0 until the user adds doors/windows). */
+  get openingCount(): number {
+    return this.openingTaps.length;
+  }
+
   /**
    * Records a corner tap. Adding or removing corners invalidates stored openings
    * (wall indices shift), so openings must be added after the final corner.
+   * @returns how many recorded openings were discarded by this change — callers
+   *          should surface that to the user instead of letting it happen silently.
    */
-  addCorner(world: [number, number, number], quality: ArTrackingQuality): void {
+  addCorner(
+    world: [number, number, number],
+    quality: ArTrackingQuality,
+  ): number {
+    const cleared = this.openingTaps.length;
     this.corners.push({ world, quality });
     this.openingTaps = [];
+    return cleared;
   }
 
-  undoCorner(): void {
+  /**
+   * Removes the last corner.
+   * @returns how many recorded openings were discarded (see `addCorner`).
+   */
+  undoCorner(): number {
+    const cleared = this.openingTaps.length;
     this.corners.pop();
     this.openingTaps = [];
+    return cleared;
   }
 
   clear(): void {

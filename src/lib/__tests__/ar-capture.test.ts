@@ -67,6 +67,27 @@ describe('ArCaptureSession corner bookkeeping', () => {
     expect(plan.openings).toEqual([]);
     expect(plan.walls).toHaveLength(5);
   });
+
+  it('reports how many openings a corner change discards', () => {
+    const session = makeRectSession();
+    expect(session.openingCount).toBe(0);
+    // No openings yet — adding and undoing corners clears nothing.
+    expect(session.addCorner([1, 1.5, 4], 'normal')).toBe(0);
+    expect(session.undoCorner()).toBe(0);
+
+    // Two openings recorded, then the corner order changes: both are discarded
+    // AND reported, so the UI can tell the user instead of losing them silently.
+    expect(session.addOpening([1.5, 0, 0], 'door', 0.85, 'normal')).toBe(true);
+    expect(session.addOpening([3, 0, 2], 'window', 1.2, 'normal')).toBe(true);
+    expect(session.openingCount).toBe(2);
+
+    expect(session.undoCorner()).toBe(2);
+    expect(session.openingCount).toBe(0);
+
+    expect(session.addOpening([1.5, 0, 0], 'door', 0.85, 'normal')).toBe(true);
+    expect(session.addCorner([1, 1.5, 4], 'normal')).toBe(1);
+    expect(session.openingCount).toBe(0);
+  });
 });
 
 describe('ArCaptureSession.locateOnWall', () => {

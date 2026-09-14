@@ -4,6 +4,7 @@ import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -11,6 +12,7 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { BlueprintSvg } from '@/components/blueprint-svg';
 import { PhotoStrip } from '@/components/photo-strip';
@@ -33,6 +35,7 @@ import {
   addPhoto,
   createRoom,
   getPhotos,
+  getPlan,
   getRoomLabel,
   hasRoom,
   removePhoto,
@@ -51,25 +54,56 @@ type Phase = 'camera' | 'uploading' | 'review' | 'error';
 /**
  * Photo-assist flow (no-external-API plan, Phase 2): for rooms the user can't or
  * doesn't want to walk in AR, snap a few photos and let the SELF-HOSTED MoGe service
- * propose candidate walls. The user taps each suggested wall to keep or remove it,
- * then saves — the resulting plan carries capped confidence (<= 0.5), an
- * "auto-detected — verify" note, and its own frame id, so it combines with other rooms
- * through the align editor like any cross-session room. No third-party API is called;
- * the only network traffic is to the operator's own service (feature-flagged by
- * EXPO_PUBLIC_PHOTO_ASSIST_URL — this screen is unreachable without it).
+ * propose candidate walls. Each photo is its own independent frame, so the review step
+ * saves PER PHOTO: any number of photos can each be saved as their own room (the first
+ * save goes to the bound room — the one joined via ?room= when re-running assist on an
+ * existing room; later saves create new rooms). Saved plans carry capped confidence
+ * (<= 0.5), an "auto-detected — verify" note, and a unique frame id, so they combine
+ * with other rooms through the align editor like any cross-session room. No
+ * third-party API is called; the only network traffic is to the operator's own service
+ * (feature-flagged by EXPO_PUBLIC_PHOTO_ASSIST_URL — this screen is unreachable without
+ * it).
  */
 export function PhotoAssistScreen() {
   const theme = useTheme();
   const router = useRouter();
+  // Edge-to-edge (Android API 35+): the footers must clear the navigation bar.
+  const insets = useSafeAreaInsets();
   const { room } = useLocalSearchParams<{ room?: string }>();
 
-  // Join an existing room when opened with a valid id; otherwise start a new one.
-  const [roomId] = useState(() =>
-    typeof room === 'string' && hasRoom(room) ? room : createRoom(),
+  // Join an existing room when opened with a valid id (re-run flow); otherwise stay
+  // unbound until the first captured photo creates the room, so an abandoned visit
+  // leaves no empty "Room N" card behind.
+  const [roomId, setRoomId] = useState<string | null>(() =>
+    typeof room === 'string' && hasRoom(room) ? room : null,
   );
-  const [roomName, setRoomName] = useState(() => getRoomLabel(roomId) ?? '');
+  // True when the joined room already had a plan before this visit — saving into it
+  // then replaces an existing plan and must be confirmed.
+  const [preExistingPlan] = useState(
+    () => roomId !== null && getPlan(roomId) !== null,
+  );
+  const [roomName, setRoomName] = useState(() =>
+    roomId !== null ? (getRoomLabel(roomId) ?? '') : '',
+  );
+  // Photo index -> id of the room that photo's walls were saved into.
+  const [savedRooms, setSavedRooms] = useState<Record<number, string>>({});
+  // The typed name is applied to at most one auto-created room per visit (saving
+  // several photos as rooms must not produce five identically named rooms).
+  const nameAppliedRef = useRef(false);
   const [phase, setPhase] = useState<Phase>('camera');
   const [failureMessage, setFailureMessage] = useState<string | null>(null);
+
+  /** Returns the bound room id, creating it (with any typed name) on first use. */
+  const ensureRoom = useCallback((): string => {
+    if (roomId !== null) return roomId;
+    const id = createRoom();
+    setRoomId(id);
+    if (roomName !== '' && !nameAppliedRef.current) {
+      renameRoom(id, roomName);
+      nameAppliedRef.current = true;
+    }
+    return id;
+  }, [roomId, roomName]);
 
   // --- camera step -------------------------------------------------------------
   const [permission, requestPermission] = useCameraPermissions();
@@ -77,7 +111,7 @@ export function PhotoAssistScreen() {
   const [cameraReady, setCameraReady] = useState(false);
   const [capturing, setCapturing] = useState(false);
   const [photos, setPhotos] = useState<ProcessedPhoto[]>(() =>
-    getPhotos(roomId),
+    roomId !== null ? getPhotos(roomId) : [],
   );
   // Set when the preview fails to start; cleared on retry (remount via key bump).
   const [cameraError, setCameraError] = useState<string | null>(null);
@@ -113,7 +147,9 @@ export function PhotoAssistScreen() {
   const handleNameChange = useCallback(
     (text: string) => {
       setRoomName(text);
-      renameRoom(roomId, text);
+      // Live-rename only once the room exists; before that the name is local and is
+      // applied by ensureRoom() when the first photo creates the room.
+      if (roomId !== null) renameRoom(roomId, text);
     },
     [roomId],
   );
@@ -147,7 +183,8 @@ export function PhotoAssistScreen() {
           .toString(36)
           .slice(2, 8)}`,
       );
-      addPhoto(roomId, photo);
+      // First meaningful input — this is when the room actually comes into existence.
+      addPhoto(ensureRoom(), photo);
       setPhotos((prev) => [...prev, photo]);
     } catch (error) {
       showToast(
@@ -156,10 +193,11 @@ export function PhotoAssistScreen() {
     } finally {
       setCapturing(false);
     }
-  }, [cameraReady, capturing, photos.length, roomId, showToast]);
+  }, [cameraReady, capturing, ensureRoom, photos.length, showToast]);
 
   const handleRemovePhoto = useCallback(
     (key: string) => {
+      if (roomId === null) return; // no photos exist before the room does
       removePhoto(roomId, key);
       setPhotos((prev) => prev.filter((photo) => photo.key !== key));
     },
@@ -209,6 +247,17 @@ export function PhotoAssistScreen() {
     return selectedResult.walls.filter((_, i) => deleted[i] !== true);
   }, [selectedResult, deletedWalls]);
 
+  /** How many walls the user kept for a given photo (drives its save button). */
+  const keptCountFor = useCallback(
+    (index: number): number => {
+      const entry = results?.find((candidate) => candidate.index === index);
+      if (entry === undefined) return 0;
+      const deleted = deletedWalls[index] ?? [];
+      return entry.walls.filter((_, i) => deleted[i] !== true).length;
+    },
+    [results, deletedWalls],
+  );
+
   const previewPlan = useMemo(
     () => suggestionPreviewPlan(keptWalls),
     [keptWalls],
@@ -227,28 +276,85 @@ export function PhotoAssistScreen() {
     [selectedResult],
   );
 
-  const handleSavePlan = useCallback(() => {
-    if (keptWalls.length === 0) return;
-    try {
-      const plan = suggestionToPlan(keptWalls, roomName);
-      saveRoomPlan(roomId, plan);
-      // Each photo frame is unrelated to every other: a unique per-room frame id keeps
-      // this room out of auto-merge — it joins the combined blueprint via the align
-      // editor, exactly like a cross-session AR room.
-      setArSession(roomId, `assist-${roomId}`);
-      setPlanSource(roomId, 'photo-assist');
-      router.push(`/blueprint?room=${roomId}`);
-    } catch (error) {
-      showToast(
-        error instanceof Error ? error.message : 'Could not save the plan.',
-      );
+  // --- per-photo save (F2: one photo -> one room, several may be saved) -----------
+  // The bound room (joined via ?room= or created on the first photo) receives the
+  // FIRST save of the visit; every later save creates a new room. Re-saving a photo
+  // that was already saved updates that photo's own room.
+  const resolveSaveTarget = useCallback((): string => {
+    if (roomId === null) return ensureRoom(); // unreachable: saving needs a photo
+    if (Object.keys(savedRooms).length === 0) return roomId;
+    const id = createRoom();
+    if (roomName !== '' && !nameAppliedRef.current) {
+      renameRoom(id, roomName);
+      nameAppliedRef.current = true;
     }
-  }, [keptWalls, roomName, roomId, router, showToast]);
+    return id;
+  }, [ensureRoom, roomId, savedRooms, roomName]);
+
+  const savePhotoToRoom = useCallback(
+    (index: number, targetId: string) => {
+      const entry = results?.find((candidate) => candidate.index === index);
+      if (entry === undefined) return;
+      const deleted = deletedWalls[index] ?? [];
+      const kept = entry.walls.filter((_, i) => deleted[i] !== true);
+      if (kept.length === 0) return;
+      try {
+        const plan = suggestionToPlan(kept, getRoomLabel(targetId) ?? roomName);
+        saveRoomPlan(targetId, plan);
+        // Each photo frame is unrelated to every other: a unique per-room frame id keeps
+        // this room out of auto-merge — it joins the combined blueprint via the align
+        // editor, exactly like a cross-session AR room.
+        setArSession(targetId, `assist-${targetId}`);
+        setPlanSource(targetId, 'photo-assist');
+        setSavedRooms((current) => ({ ...current, [index]: targetId }));
+        showToast(`Saved as "${getRoomLabel(targetId) ?? 'room'}"`);
+      } catch (error) {
+        showToast(
+          error instanceof Error ? error.message : 'Could not save the plan.',
+        );
+      }
+    },
+    [deletedWalls, results, roomName, showToast],
+  );
+
+  const handleSavePhoto = useCallback(
+    (index: number) => {
+      const targetId = savedRooms[index] ?? resolveSaveTarget();
+      // Replacing a plan that existed BEFORE this visit (re-run flow) is destructive —
+      // confirm it. Updating a room created or already saved during this visit is not
+      // (the first save into the joined room consumed the confirmation).
+      const alreadySavedThisVisit =
+        Object.values(savedRooms).includes(targetId);
+      if (targetId === roomId && preExistingPlan && !alreadySavedThisVisit) {
+        Alert.alert(
+          'Replace existing plan?',
+          `Room "${getRoomLabel(targetId) ?? ''}" already has a saved plan. Replace it with this photo's walls?`,
+          [
+            { text: 'Keep old plan', style: 'cancel' },
+            {
+              text: 'Replace',
+              style: 'destructive',
+              onPress: () => savePhotoToRoom(index, targetId),
+            },
+          ],
+        );
+        return;
+      }
+      savePhotoToRoom(index, targetId);
+    },
+    [preExistingPlan, resolveSaveTarget, roomId, savedRooms, savePhotoToRoom],
+  );
+
+  const anySaved = Object.keys(savedRooms).length > 0;
 
   const handleRetake = useCallback(() => {
     setResults(null);
     setSelectedIndex(null);
     setDeletedWalls({});
+    // The saved ROOMS stay in the list (real data), but the photo→room mapping is
+    // stale once the photo set changes — a fresh analysis must not show "Saved" for
+    // photos that were never saved.
+    setSavedRooms({});
     setFailureMessage(null);
     setPhase('camera');
   }, []);
@@ -307,10 +413,15 @@ export function PhotoAssistScreen() {
     ).length;
 
     return (
-      <ThemedView style={styles.container}>
+      <ThemedView
+        style={[
+          styles.container,
+          { paddingBottom: Spacing.three + insets.bottom },
+        ]}
+      >
         <ThemedText variant="small" themeColor="textSecondary">
           {withWalls.length > 0
-            ? 'Pick a photo, tap walls to remove false positives, then save.'
+            ? 'Each photo can become its own room. Tap a photo, remove false-positive walls, then save it as a room — you can save several.'
             : 'No walls detected in any photo.'}
         </ThemedText>
 
@@ -342,32 +453,73 @@ export function PhotoAssistScreen() {
               (sum, wall) => sum + wall.lengthM,
               0,
             );
+            const keptCount = keptCountFor(entry.index);
+            const savedId = savedRooms[entry.index];
             return (
-              <Pressable
+              <View
                 key={entry.index}
-                accessibilityRole="button"
-                onPress={() => setSelectedIndex(entry.index)}
                 style={[
                   styles.resultCard,
                   { backgroundColor: theme.backgroundElement },
                   selected && { borderColor: theme.primary, borderWidth: 2 },
                 ]}
               >
-                <Image
-                  source={{ uri: photos[entry.index]?.uri ?? '' }}
-                  style={styles.resultThumb}
-                  contentFit="cover"
-                />
-                <View style={styles.resultText}>
-                  <ThemedText variant="smallBold">
-                    Photo {entry.index + 1} — {entry.walls.length} wall
-                    {entry.walls.length === 1 ? '' : 's'}
-                  </ThemedText>
-                  <ThemedText variant="small" themeColor="textSecondary">
-                    ~{totalM.toFixed(1)} m total · auto-detected, verify
-                  </ThemedText>
-                </View>
-              </Pressable>
+                {/* The card selects the photo for curation; saving is a separate,
+                    explicit action so "curate" and "commit" never blur together. */}
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={`Select photo ${entry.index + 1}`}
+                  onPress={() => setSelectedIndex(entry.index)}
+                  style={styles.resultSelect}
+                >
+                  <Image
+                    source={{ uri: photos[entry.index]?.uri ?? '' }}
+                    style={styles.resultThumb}
+                    contentFit="cover"
+                  />
+                  <View style={styles.resultText}>
+                    <ThemedText variant="smallBold">
+                      Photo {entry.index + 1} — {entry.walls.length} wall
+                      {entry.walls.length === 1 ? '' : 's'}
+                    </ThemedText>
+                    <ThemedText variant="small" themeColor="textSecondary">
+                      ~{totalM.toFixed(1)} m total · auto-detected, verify
+                    </ThemedText>
+                  </View>
+                </Pressable>
+                {savedId !== undefined ? (
+                  <Pressable
+                    accessibilityRole="button"
+                    onPress={() => router.push(`/blueprint?room=${savedId}`)}
+                    style={({ pressed }) => [
+                      styles.secondaryButton,
+                      { backgroundColor: theme.backgroundSelected },
+                      pressed && styles.pressed,
+                    ]}
+                  >
+                    <Text style={[styles.chipLabel, { color: theme.text }]}>
+                      Saved — view plan
+                    </Text>
+                  </Pressable>
+                ) : (
+                  <Pressable
+                    accessibilityRole="button"
+                    disabled={keptCount === 0}
+                    onPress={() => handleSavePhoto(entry.index)}
+                    style={({ pressed }) => [
+                      styles.primaryButton,
+                      { backgroundColor: theme.primary },
+                      keptCount === 0 && styles.disabled,
+                      pressed && styles.pressed,
+                    ]}
+                  >
+                    <Text style={styles.buttonLabel}>
+                      Save as room ({keptCount} wall{keptCount === 1 ? '' : 's'}
+                      )
+                    </Text>
+                  </Pressable>
+                )}
+              </View>
             );
           })}
 
@@ -432,21 +584,19 @@ export function PhotoAssistScreen() {
                 Retake photos
               </Text>
             </Pressable>
-            <Pressable
-              accessibilityRole="button"
-              disabled={keptWalls.length === 0}
-              onPress={handleSavePlan}
-              style={({ pressed }) => [
-                styles.primaryButton,
-                { backgroundColor: theme.primary },
-                keptWalls.length === 0 && styles.disabled,
-                pressed && styles.pressed,
-              ]}
-            >
-              <Text style={styles.buttonLabel}>
-                Save plan ({keptWalls.length} walls)
-              </Text>
-            </Pressable>
+            {anySaved && (
+              <Pressable
+                accessibilityRole="button"
+                onPress={() => router.back()}
+                style={({ pressed }) => [
+                  styles.primaryButton,
+                  { backgroundColor: theme.primary },
+                  pressed && styles.pressed,
+                ]}
+              >
+                <Text style={styles.buttonLabel}>Done</Text>
+              </Pressable>
+            )}
           </View>
         </View>
 
@@ -460,7 +610,12 @@ export function PhotoAssistScreen() {
     screenFocused && permission?.granted === true && cameraError === null;
 
   return (
-    <ThemedView style={styles.container}>
+    <ThemedView
+      style={[
+        styles.container,
+        { paddingBottom: Spacing.three + insets.bottom },
+      ]}
+    >
       <View style={styles.cameraArea}>
         {cameraActive ? (
           <CameraView
@@ -629,16 +784,23 @@ const styles = StyleSheet.create({
     padding: Spacing.three,
   },
   resultCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
     gap: Spacing.two,
     borderRadius: 12,
     padding: Spacing.two,
+  },
+  resultSelect: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.two,
   },
   resultThumb: {
     width: 64,
     height: 64,
     borderRadius: 8,
+  },
+  chipLabel: {
+    fontSize: 13,
+    fontWeight: 600,
   },
   resultText: {
     flex: 1,

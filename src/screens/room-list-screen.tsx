@@ -8,11 +8,13 @@ import {
   Text,
   View,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
+import { formatAreaM2 } from '@/lib/blueprint-schema';
 import { deleteRoom, listRooms, type RoomSummary } from '@/lib/session-store';
 
 /**
@@ -26,6 +28,8 @@ export function RoomListScreen() {
   const theme = useTheme();
   const router = useRouter();
   const navigation = useNavigation();
+  // Edge-to-edge (Android API 35+): the last card must scroll clear of the nav bar.
+  const insets = useSafeAreaInsets();
   // Bumped after store mutations and on every focus so the list re-reads the
   // in-memory session store (e.g. after returning from AR capture, which creates
   // new rooms). Stack screens stay mounted, so memos need this explicit refresh.
@@ -134,7 +138,12 @@ export function RoomListScreen() {
         </Pressable>
       </View>
 
-      <ScrollView contentContainerStyle={styles.list}>
+      <ScrollView
+        contentContainerStyle={[
+          styles.list,
+          { paddingBottom: Spacing.four + insets.bottom },
+        ]}
+      >
         {rooms.length === 0 && (
           <ThemedText variant="small" themeColor="textSecondary">
             No rooms yet — create one to get started.
@@ -155,11 +164,14 @@ export function RoomListScreen() {
                 {room.photoCount} photo{room.photoCount === 1 ? '' : 's'} ·{' '}
                 {room.hasPlan
                   ? room.planSource === 'ar-tap'
-                    ? 'AR-measured plan'
+                    ? 'Measured in AR'
                     : room.planSource === 'photo-assist'
-                      ? 'photo-assisted plan — verify'
+                      ? 'From photos — check it'
                       : 'plan ready'
                   : 'no plan yet'}
+                {room.hasPlan && formatAreaM2(room.areaM2) !== null && (
+                  <> · {formatAreaM2(room.areaM2)}</>
+                )}
               </ThemedText>
             </Pressable>
             <View style={styles.cardActions}>

@@ -9,6 +9,7 @@ import {
   Text,
   View,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { BlueprintSvg } from '@/components/blueprint-svg';
 import { PhotoStrip } from '@/components/photo-strip';
@@ -18,7 +19,11 @@ import { Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { activeProvider, generateFloorPlan } from '@/lib/ai-provider';
 import { mergeSameFramePlans } from '@/lib/ar-capture';
-import type { FloorPlan } from '@/lib/blueprint-schema';
+import {
+  formatAreaM2,
+  planAreaM2,
+  type FloorPlan,
+} from '@/lib/blueprint-schema';
 import { planToDxfString } from '@/lib/dxf-export';
 import { savePlanToGallery } from '@/lib/gallery-save';
 import {
@@ -50,6 +55,8 @@ interface CombinedRoomEntry {
   id: string;
   label: string;
   placed: boolean;
+  /** Enclosed area of the group's merged plan, or null when it has no closed rooms. */
+  areaM2: number | null;
 }
 
 type BlueprintStatus = 'working' | 'error' | 'done';
@@ -77,6 +84,8 @@ export function BlueprintScreen() {
   const theme = useTheme();
   const router = useRouter();
   const navigation = useNavigation();
+  // Edge-to-edge (Android API 35+): the action rows must clear the nav bar.
+  const insets = useSafeAreaInsets();
   const { room, view } = useLocalSearchParams<{
     room?: string;
     view?: 'combined';
@@ -135,11 +144,22 @@ export function BlueprintScreen() {
       // A group joins the blueprint once any of its rooms has a stored placement.
       const stored = ids.map((id) => getPlacement(id)).find((p) => p !== null);
       const label = ids.map((id) => getRoomLabel(id) ?? id).join(' + ');
+      const groupPlan = mergeGroupPlans(ids);
       if (stored !== undefined) {
-        parts.push({ plan: mergeGroupPlans(ids), placement: stored });
-        otherGroups.push({ id: ids[0]!, label, placed: true });
+        parts.push({ plan: groupPlan, placement: stored });
+        otherGroups.push({
+          id: ids[0]!,
+          label,
+          placed: true,
+          areaM2: planAreaM2(groupPlan),
+        });
       } else {
-        otherGroups.push({ id: ids[0]!, label, placed: false });
+        otherGroups.push({
+          id: ids[0]!,
+          label,
+          placed: false,
+          areaM2: planAreaM2(groupPlan),
+        });
       }
     }
 
@@ -240,12 +260,14 @@ export function BlueprintScreen() {
     else router.back();
   }, [isCombined, router]);
 
-  // Room-mode recapture goes back to the flow that produced the plan: AR re-measure
-  // for tap-to-trace rooms, the photo-assist screen for assisted rooms.
+  // Room-mode recapture routes to the flow that produced the plan — each one JOINS
+  // this room via ?room=, so a re-measurement replaces its plan in place (with a
+  // confirm) instead of spawning a duplicate room.
   const handleRecapture = useCallback(() => {
-    if (isPhotoAssist) router.push(`/photo-assist?room=${roomId}`);
-    else handleBack();
-  }, [handleBack, isPhotoAssist, roomId, router]);
+    if (isArMeasured) router.push(`/ar-capture?room=${roomId}`);
+    else if (isPhotoAssist) router.push(`/photo-assist?room=${roomId}`);
+    else router.push(`/capture?room=${roomId}`);
+  }, [isArMeasured, isPhotoAssist, roomId, router]);
 
   // --- export -----------------------------------------------------------------
   const displayedPlan: FloorPlan | null = isCombined ? mergedPlan : plan;
@@ -300,8 +322,15 @@ export function BlueprintScreen() {
   }, [displayedPlan, sharePlan, handleSaveToGallery]);
 
   // --- render -----------------------------------------------------------------
+  // No photos and no stored plan: the only useful action is to capture for THIS room.
+  const handleRetakePhotos = useCallback(() => {
+    router.push(`/capture?room=${roomId}`);
+  }, [roomId, router]);
+
   if (isCombined) {
     const otherGroups = combined?.otherGroups ?? [];
+    const totalArea =
+      mergedPlan !== null ? formatAreaM2(planAreaM2(mergedPlan)) : null;
     return (
       <ThemedView style={styles.container}>
         {mergedPlan !== null ? (
@@ -323,6 +352,7 @@ export function BlueprintScreen() {
                 {mergedPlan.walls.length} walls · {mergedPlan.rooms.length} room
                 {mergedPlan.rooms.length === 1 ? '' : 's'} ·{' '}
                 {mergedPlan.openings.length} openings
+                {totalArea !== null ? ` · ${totalArea}` : ''}
               </ThemedText>
             </View>
           </>
@@ -344,33 +374,42 @@ export function BlueprintScreen() {
             ]}
           >
             <ThemedText variant="smallBold">
-              Rooms from other AR sessions
+              Rooms that need alignment
             </ThemedText>
-            {otherGroups.map((group) => (
-              <View key={group.id} style={styles.alignRow}>
-                <ThemedText variant="small" themeColor="textSecondary">
-                  {group.label}
-                  {group.placed ? ' — aligned' : ' — needs alignment'}
-                </ThemedText>
-                <Pressable
-                  accessibilityRole="button"
-                  onPress={() => router.push(`/align?room=${group.id}`)}
-                  style={({ pressed }) => [
-                    styles.chip,
-                    { backgroundColor: theme.backgroundElement },
-                    pressed && styles.pressed,
-                  ]}
-                >
-                  <Text style={[styles.chipLabel, { color: theme.text }]}>
-                    {group.placed ? 'Re-align' : 'Align'}
-                  </Text>
-                </Pressable>
-              </View>
-            ))}
+            {otherGroups.map((group) => {
+              const groupArea = formatAreaM2(group.areaM2);
+              return (
+                <View key={group.id} style={styles.alignRow}>
+                  <ThemedText variant="small" themeColor="textSecondary">
+                    {group.label}
+                    {group.placed ? ' — aligned' : ' — needs alignment'}
+                    {groupArea !== null ? ` · ${groupArea}` : ''}
+                  </ThemedText>
+                  <Pressable
+                    accessibilityRole="button"
+                    onPress={() => router.push(`/align?room=${group.id}`)}
+                    style={({ pressed }) => [
+                      styles.chip,
+                      { backgroundColor: theme.backgroundElement },
+                      pressed && styles.pressed,
+                    ]}
+                  >
+                    <Text style={[styles.chipLabel, { color: theme.text }]}>
+                      {group.placed ? 'Re-align' : 'Align'}
+                    </Text>
+                  </Pressable>
+                </View>
+              );
+            })}
           </View>
         )}
 
-        <View style={styles.actions}>
+        <View
+          style={[
+            styles.actions,
+            { paddingBottom: Spacing.two + insets.bottom },
+          ]}
+        >
           {mergedPlan !== null && (
             <Pressable
               accessibilityRole="button"
@@ -416,6 +455,10 @@ export function BlueprintScreen() {
   // AR-measured room has a real plan but no photos by design.
   const blocked = missingPhotos && storedPlan === null;
 
+  // The area only exists for closed room polygons — it doubles as a sanity check on
+  // measurement quality (a 4 m × 3 m room reading 25 m² flags a bad trace at once).
+  const planArea = plan !== null ? formatAreaM2(planAreaM2(plan)) : null;
+
   return (
     <ThemedView style={styles.container}>
       {blocked ? (
@@ -425,14 +468,14 @@ export function BlueprintScreen() {
           </ThemedText>
           <Pressable
             accessibilityRole="button"
-            onPress={handleBack}
+            onPress={handleRetakePhotos}
             style={({ pressed }) => [
               styles.primaryButton,
               { backgroundColor: theme.primary },
               pressed && styles.pressed,
             ]}
           >
-            <Text style={styles.buttonLabel}>Retake photos</Text>
+            <Text style={styles.buttonLabel}>Capture photos</Text>
           </Pressable>
         </View>
       ) : status === 'working' ? (
@@ -467,7 +510,7 @@ export function BlueprintScreen() {
           </Pressable>
           <Pressable
             accessibilityRole="button"
-            onPress={handleBack}
+            onPress={handleRetakePhotos}
             style={({ pressed }) => [
               styles.secondaryButton,
               { backgroundColor: theme.backgroundElement },
@@ -475,7 +518,7 @@ export function BlueprintScreen() {
             ]}
           >
             <Text style={[styles.buttonLabel, { color: theme.text }]}>
-              Retake photos
+              Capture photos
             </Text>
           </Pressable>
         </View>
@@ -512,7 +555,7 @@ export function BlueprintScreen() {
               <ThemedText variant="smallBold">
                 {plan.walls.length} walls · {plan.rooms.length} room
                 {plan.rooms.length === 1 ? '' : 's'} · {plan.openings.length}{' '}
-                openings
+                openings{planArea !== null ? ` · ${planArea}` : ''}
               </ThemedText>
               {plan.notes !== undefined && (
                 <ThemedText variant="small" themeColor="textSecondary">
@@ -521,7 +564,12 @@ export function BlueprintScreen() {
               )}
             </View>
           )}
-          <View style={styles.actions}>
+          <View
+            style={[
+              styles.actions,
+              { paddingBottom: Spacing.two + insets.bottom },
+            ]}
+          >
             {/* Regenerate would replace a real measurement (AR or assisted) with a mock sample. */}
             {!isArMeasured && !isPhotoAssist && (
               <Pressable

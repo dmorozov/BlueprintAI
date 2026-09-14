@@ -1,4 +1,4 @@
-import type { FloorPlan } from '@/lib/blueprint-schema';
+import { planAreaM2, type FloorPlan } from '@/lib/blueprint-schema';
 import type { ProcessedPhoto } from '@/lib/image-pipeline';
 import type { RoomPlacement } from '@/lib/plan-transform';
 
@@ -46,6 +46,11 @@ export interface RoomSummary {
   hasPlan: boolean;
   planSource: PlanSource | null;
   arSessionId: string | null;
+  /**
+   * Enclosed area of the stored plan in m² (sum of room polygons), or null when the
+   * room has no plan or its plan has no closed room polygon (walls-only plans).
+   */
+  areaM2: number | null;
   createdAt: number;
 }
 
@@ -181,6 +186,7 @@ export function listRooms(): RoomSummary[] {
       hasPlan: room.plan !== null,
       planSource: room.planSource,
       arSessionId: room.arSessionId,
+      areaM2: room.plan !== null ? planAreaM2(room.plan) : null,
       createdAt: room.createdAt,
     });
   }

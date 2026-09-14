@@ -297,3 +297,41 @@ export function pointOnWall(
 ): [number, number] {
   return [from[0] + (to[0] - from[0]) * t, from[1] + (to[1] - from[1]) * t];
 }
+
+/**
+ * Enclosed area of a closed polygon in m² (shoelace formula; absolute value, so the
+ * winding order does not matter). Returns 0 for degenerate polygons (< 3 points).
+ */
+export function polygonAreaM2(polygon: Point[]): number {
+  if (polygon.length < 3) return 0;
+  let sum = 0;
+  for (let i = 0; i < polygon.length; i++) {
+    const [x1, y1] = polygon[i]!;
+    const [x2, y2] = polygon[(i + 1) % polygon.length]!;
+    sum += x1 * y2 - x2 * y1;
+  }
+  return Math.abs(sum / 2);
+}
+
+/**
+ * Total enclosed area of a plan (sum over all room polygons), or null when the plan
+ * has no rooms — walls-only plans (e.g. photo-assist results that did not chain into
+ * a closed loop) have no well-defined area and must not show one.
+ */
+export function planAreaM2(plan: FloorPlan): number | null {
+  if (plan.rooms.length === 0) return null;
+  let total = 0;
+  for (const room of plan.rooms) total += polygonAreaM2(room.polygon);
+  return total;
+}
+
+/**
+ * User-facing area string, e.g. "≈ 13.0 m²" — one decimal below 100 m², whole meters
+ * above (precision beyond that is not meaningful for these measurements). Null when
+ * no area can be shown.
+ */
+export function formatAreaM2(areaM2: number | null): string | null {
+  if (areaM2 === null || !Number.isFinite(areaM2) || areaM2 <= 0) return null;
+  const text = areaM2 >= 100 ? areaM2.toFixed(0) : areaM2.toFixed(1);
+  return `≈ ${text} m²`;
+}

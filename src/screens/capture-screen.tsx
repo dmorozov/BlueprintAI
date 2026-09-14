@@ -9,6 +9,7 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { PhotoStrip } from '@/components/photo-strip';
 import { ThemedText } from '@/components/themed-text';
@@ -32,17 +33,22 @@ const TOAST_DURATION_MS = 2500;
 /**
  * Capture screen: permission gate → live camera preview → shutter → per-room photo
  * strip → hand off to the blueprint screen. Joins the room given via `?room=` (from the
- * room list) or creates a new one; the room name is editable in place.
+ * room list); a new room is created lazily on the first captured photo, so an
+ * abandoned visit leaves no empty "Room N" card behind (the name typed before that
+ * is applied to the room when it is created).
  */
 export function CaptureScreen() {
   const theme = useTheme();
   const router = useRouter();
+  // Edge-to-edge (Android API 35+): the footer must clear the navigation bar.
+  const insets = useSafeAreaInsets();
   const [permission, requestPermission] = useCameraPermissions();
   const { room } = useLocalSearchParams<{ room?: string }>();
 
-  // Join an existing room when opened with a valid id; otherwise start a new one.
-  const [roomId] = useState(() =>
-    typeof room === 'string' && hasRoom(room) ? room : createRoom(),
+  // Join an existing room when opened with a valid id; otherwise stay unbound until
+  // the first photo creates the room.
+  const [roomId, setRoomId] = useState<string | null>(() =>
+    typeof room === 'string' && hasRoom(room) ? room : null,
   );
 
   const cameraRef = useRef<CameraView | null>(null);
@@ -50,16 +56,29 @@ export function CaptureScreen() {
   const [screenFocused, setScreenFocused] = useState(true);
   const [capturing, setCapturing] = useState(false);
   const [photos, setPhotos] = useState<ProcessedPhoto[]>(() =>
-    getPhotos(roomId),
+    roomId !== null ? getPhotos(roomId) : [],
   );
-  const [roomName, setRoomName] = useState(() => getRoomLabel(roomId) ?? '');
+  const [roomName, setRoomName] = useState(() =>
+    roomId !== null ? (getRoomLabel(roomId) ?? '') : '',
+  );
+
+  /** Returns the bound room id, creating it (with any typed name) on first use. */
+  const ensureRoom = useCallback((): string => {
+    if (roomId !== null) return roomId;
+    const id = createRoom();
+    setRoomId(id);
+    if (roomName !== '') renameRoom(id, roomName);
+    return id;
+  }, [roomId, roomName]);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const handleNameChange = useCallback(
     (text: string) => {
       setRoomName(text);
-      renameRoom(roomId, text);
+      // Live-rename only once the room exists; before that the name is local and is
+      // applied by ensureRoom() when the first photo creates the room.
+      if (roomId !== null) renameRoom(roomId, text);
     },
     [roomId],
   );
@@ -112,7 +131,8 @@ export function CaptureScreen() {
         exif: false,
       });
       const photo = await preparePhoto(picture, `photo-${Date.now()}`);
-      addPhoto(roomId, photo);
+      // First meaningful input — this is when the room actually comes into existence.
+      addPhoto(ensureRoom(), photo);
       setPhotos((prev) => [...prev, photo]);
     } catch (error) {
       showToast(
@@ -121,10 +141,11 @@ export function CaptureScreen() {
     } finally {
       setCapturing(false);
     }
-  }, [cameraReady, capturing, roomId, showToast]);
+  }, [cameraReady, capturing, ensureRoom, showToast]);
 
   const handleRemove = useCallback(
     (key: string) => {
+      if (roomId === null) return; // no photos exist before the room does
       removePhoto(roomId, key);
       setPhotos((prev) => prev.filter((photo) => photo.key !== key));
     },
@@ -132,6 +153,7 @@ export function CaptureScreen() {
   );
 
   const handleGenerate = useCallback(() => {
+    if (roomId === null) return; // unreachable: the button needs ≥1 photo
     router.push(`/blueprint?room=${roomId}`);
   }, [router, roomId]);
 
@@ -196,7 +218,15 @@ export function CaptureScreen() {
         />
       )}
 
-      <View style={[styles.footer, { backgroundColor: theme.background }]}>
+      <View
+        style={[
+          styles.footer,
+          {
+            backgroundColor: theme.background,
+            paddingBottom: Spacing.four + insets.bottom,
+          },
+        ]}
+      >
         <Pressable
           accessibilityRole="button"
           accessibilityLabel="Take photo"
@@ -274,7 +304,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: Spacing.three,
     paddingTop: Spacing.three,
-    paddingBottom: Spacing.four,
   },
   shutter: {
     width: 72,

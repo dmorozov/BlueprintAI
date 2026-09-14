@@ -1,26 +1,39 @@
-import { useRouter } from 'expo-router';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useNavigation, useRouter } from 'expo-router';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Pressable, StyleSheet, Text } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { ToastBubble } from '@/components/toast-bubble';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { isPhotoAssistConfigured } from '@/lib/photo-assist-client';
-
-const TOAST_DURATION_MS = 2000;
+import { listRooms } from '@/lib/session-store';
 
 export function HomeScreen() {
   const theme = useTheme();
   const router = useRouter();
-  const [toastMessage, setToastMessage] = useState<string | null>(null);
-  const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const navigation = useNavigation();
 
   // Photo assist (plan Phase 2) is feature-flagged: it only appears when the operator
   // has configured a self-hosted MoGe service via EXPO_PUBLIC_PHOTO_ASSIST_URL.
   const photoAssistAvailable = isPhotoAssistConfigured();
+
+  // Summary of existing work so returning users see where they left off instead of a
+  // static hint (re-read on focus: stack screens stay mounted, and AR capture creates
+  // rooms behind this screen).
+  const [version, setVersion] = useState(0);
+  useEffect(() => {
+    const unsubscribe = navigation.addListener('focus', () => {
+      setVersion((v) => v + 1);
+    });
+    return unsubscribe;
+  }, [navigation]);
+  // `version` is intentional: it forces a re-read of the in-memory session store after
+  // mutations (react-hooks/exhaustive-deps cannot see module stores).
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const rooms = useMemo(() => listRooms(), [version]);
+  const withPlans = rooms.filter((room) => room.hasPlan).length;
 
   const handleCreateBlueprint = useCallback(() => {
     router.push('/ar-capture');
@@ -29,22 +42,6 @@ export function HomeScreen() {
   const handlePhotoAssist = useCallback(() => {
     router.push('/photo-assist');
   }, [router]);
-
-  const showToast = useCallback((message: string) => {
-    setToastMessage(message);
-    if (hideTimer.current !== null) clearTimeout(hideTimer.current);
-    hideTimer.current = setTimeout(
-      () => setToastMessage(null),
-      TOAST_DURATION_MS,
-    );
-  }, []);
-
-  useEffect(
-    () => () => {
-      if (hideTimer.current !== null) clearTimeout(hideTimer.current);
-    },
-    [],
-  );
 
   return (
     <ThemedView style={styles.container}>
@@ -57,17 +54,28 @@ export function HomeScreen() {
           themeColor="textSecondary"
           style={styles.tagline}
         >
-          React Native · Expo · TypeScript
+          Turn your rooms into measured floor plans.
         </ThemedText>
 
-        <ThemedText
-          variant="small"
-          themeColor="textSecondary"
-          style={styles.hint}
-        >
-          Walk the room in AR and tap each wall corner — real measurements, no
-          cloud AI.
-        </ThemedText>
+        {rooms.length > 0 ? (
+          <ThemedText
+            variant="small"
+            themeColor="textSecondary"
+            style={styles.hint}
+          >
+            {rooms.length} room{rooms.length === 1 ? '' : 's'} · {withPlans}{' '}
+            with plan{withPlans === 1 ? '' : 's'} — continue in Rooms.
+          </ThemedText>
+        ) : (
+          <ThemedText
+            variant="small"
+            themeColor="textSecondary"
+            style={styles.hint}
+          >
+            Walk the room in AR and tap each wall corner — real measurements, no
+            cloud AI.
+          </ThemedText>
+        )}
 
         <Pressable
           accessibilityRole="button"
@@ -102,7 +110,7 @@ export function HomeScreen() {
             <Text
               style={[styles.buttonLabel, { color: theme.text, fontSize: 14 }]}
             >
-              Photo assist (self-hosted)
+              Measure with photos
             </Text>
           </Pressable>
         )}
@@ -123,7 +131,7 @@ export function HomeScreen() {
           <Text
             style={[styles.buttonLabel, { color: theme.text, fontSize: 14 }]}
           >
-            Photos (mock plan)
+            Sample plan from photos (testing)
           </Text>
         </Pressable>
 
@@ -146,29 +154,7 @@ export function HomeScreen() {
             Rooms
           </Text>
         </Pressable>
-
-        <Pressable
-          accessibilityRole="button"
-          onPress={() => showToast('Test clicked!')}
-          style={({ pressed }) => [
-            {
-              backgroundColor: theme.backgroundElement,
-              borderRadius: 999,
-              paddingHorizontal: Spacing.four,
-              paddingVertical: Spacing.two,
-            },
-            pressed && styles.buttonPressed,
-          ]}
-        >
-          <Text
-            style={[styles.buttonLabel, { color: theme.text, fontSize: 14 }]}
-          >
-            Test
-          </Text>
-        </Pressable>
       </SafeAreaView>
-
-      <ToastBubble message={toastMessage} />
     </ThemedView>
   );
 }

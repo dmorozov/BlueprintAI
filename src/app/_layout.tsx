@@ -26,6 +26,10 @@ export default function RootLayout() {
             options={{ title: 'Measure with AR' }}
           />
           <Stack.Screen name="capture" options={{ title: 'Capture' }} />
+          <Stack.Screen
+            name="photo-assist"
+            options={{ title: 'Measure with photos' }}
+          />
           <Stack.Screen name="blueprint" options={{ title: 'Blueprint' }} />
           <Stack.Screen name="align" options={{ title: 'Align room' }} />
         </Stack>

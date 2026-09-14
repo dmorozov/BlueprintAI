@@ -13,6 +13,7 @@ import {
   type PanGestureHandlerGestureEvent,
 } from 'react-native-gesture-handler';
 import { G, Svg } from 'react-native-svg';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import {
   MIN_PLAN_SIZE_M,
@@ -79,6 +80,8 @@ function mergeGroupPlans(ids: string[]): FloorPlan {
 export function AlignScreen() {
   const theme = useTheme();
   const router = useRouter();
+  // Edge-to-edge (Android API 35+): the Save/Cancel row must clear the nav bar.
+  const insets = useSafeAreaInsets();
   const { room } = useLocalSearchParams<{ room?: string }>();
   const roomId = typeof room === 'string' ? room : '';
 
@@ -305,7 +308,12 @@ export function AlignScreen() {
   );
 
   return (
-    <ThemedView style={styles.container}>
+    <ThemedView
+      style={[
+        styles.container,
+        { paddingBottom: Spacing.three + insets.bottom },
+      ]}
+    >
       <ThemedText variant="small" themeColor="textSecondary">
         Aligning {setup.groupLabel} — drag to move, buttons to rotate.
       </ThemedText>

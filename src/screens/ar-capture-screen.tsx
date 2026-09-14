@@ -8,16 +8,18 @@ import {
   type ViroARHitTestResult,
 } from '@reactvision/react-viro';
 import { CameraView, useCameraPermissions } from 'expo-camera';
-import { useFocusEffect, useRouter } from 'expo-router';
+import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   Pressable,
   StyleSheet,
   Text,
   TextInput,
   View,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { PhotoStrip } from '@/components/photo-strip';
 import { ThemedText } from '@/components/themed-text';
@@ -31,8 +33,11 @@ import {
   addPhoto,
   createRoom,
   getPhotos,
+  getPlan,
   getRoomLabel,
+  hasRoom,
   removePhoto,
+  renameRoom,
   setArSession,
   setPlan as saveRoomPlan,
   setPlanSource,
@@ -81,6 +86,12 @@ interface PendingOpening {
 export function ArCaptureScreen() {
   const theme = useTheme();
   const router = useRouter();
+  // Edge-to-edge (Android API 35+): the bottom bars and the opening panel must
+  // clear the navigation bar, not sit at a fixed offset from the screen edge.
+  const insets = useSafeAreaInsets();
+  // "Re-measure with AR" (blueprint screen) joins an existing room via ?room=; the
+  // home/rooms entry points arrive without it and start unbound.
+  const { room } = useLocalSearchParams<{ room?: string }>();
 
   const sessionRef = useRef<ArCaptureSession | null>(null);
   if (sessionRef.current === null) sessionRef.current = new ArCaptureSession();
@@ -113,8 +124,24 @@ export function ArCaptureScreen() {
   }, []);
 
   // The room id changes when the user starts the next room in the same AR session.
-  const [roomId, setRoomId] = useState(() => createRoom());
-  const [roomName, setRoomName] = useState(() => getRoomLabel(roomId) ?? '');
+  // A fresh visit stays UNBOUND (null) until the first corner tap creates the room —
+  // glancing at the camera and backing out must not leave an empty "Room N" card.
+  // Re-measuring joins the given room instead, so its plan can be replaced in place.
+  const [roomId, setRoomId] = useState<string | null>(() =>
+    typeof room === 'string' && hasRoom(room) ? room : null,
+  );
+  const [roomName, setRoomName] = useState(() =>
+    roomId !== null ? (getRoomLabel(roomId) ?? '') : '',
+  );
+
+  /** Returns the bound room id, creating it (with any typed name) on first use. */
+  const ensureRoom = useCallback((): string => {
+    if (roomId !== null) return roomId;
+    const id = createRoom();
+    setRoomId(id);
+    if (roomName !== '') renameRoom(id, roomName);
+    return id;
+  }, [roomId, roomName]);
 
   // --- reference-photo step (after finishing a room; for the user's records) ---
   // The AR scene is unmounted in this phase so expo-camera exclusively owns the
@@ -182,9 +209,15 @@ export function ArCaptureScreen() {
     };
   }, []);
 
-  const handleNameChange = useCallback((text: string) => {
-    setRoomName(text);
-  }, []);
+  const handleNameChange = useCallback(
+    (text: string) => {
+      setRoomName(text);
+      // Live-rename only once the room exists; before that the name is local and is
+      // applied by ensureRoom() when the first corner tap creates the room.
+      if (roomId !== null) renameRoom(roomId, text);
+    },
+    [roomId],
+  );
 
   const handleTrackingUpdated = useCallback((state: number) => {
     setTrackingState(state);
@@ -230,7 +263,16 @@ export function ArCaptureScreen() {
 
       const session = sessionRef.current!;
       if (mode === 'corner') {
-        session.addCorner(hit.transform.position, quality);
+        // First meaningful input — the room comes into existence with this tap.
+        ensureRoom();
+        // Adding a corner shifts wall indices, which silently invalidates any
+        // openings already recorded — say so instead of losing them invisibly.
+        const cleared = session.addCorner(hit.transform.position, quality);
+        if (cleared > 0) {
+          showToast(
+            `Openings cleared (${cleared}) — corner order changed; re-add them.`,
+          );
+        }
         syncCorners();
       } else {
         const location = session.locateOnWall(hit.transform.position);
@@ -246,14 +288,21 @@ export function ArCaptureScreen() {
         });
       }
     },
-    [phase, mode, qualityNow, showToast, syncCorners],
+    [ensureRoom, phase, mode, qualityNow, showToast, syncCorners],
   );
 
   const handleUndo = useCallback(() => {
     const session = sessionRef.current!;
-    session.undoCorner();
+    // Undoing a corner shifts wall indices, which discards any recorded openings —
+    // surface that instead of letting it happen silently.
+    const cleared = session.undoCorner();
+    if (cleared > 0) {
+      showToast(
+        `Corner removed — ${cleared} opening${cleared === 1 ? '' : 's'} were cleared; re-add them.`,
+      );
+    }
     syncCorners();
-  }, [syncCorners]);
+  }, [showToast, syncCorners]);
 
   const handleClear = useCallback(() => {
     const session = sessionRef.current!;
@@ -284,7 +333,10 @@ export function ArCaptureScreen() {
     setMode('corner');
   }, [openingType, openingWidth, pendingOpening, qualityNow, showToast]);
 
-  const handleFinish = useCallback(() => {
+  const finishAndSave = useCallback((): boolean => {
+    // Unreachable in practice (Finish needs ≥3 corners, which implies a room), but the
+    // type must be narrowed before touching the store.
+    if (roomId === null) return false;
     try {
       const plan = sessionRef.current!.finishRoom(roomName);
       saveRoomPlan(roomId, plan);
@@ -292,27 +344,48 @@ export function ArCaptureScreen() {
       // Real tap measurements — the UI must never present this as mock or assisted.
       setPlanSource(roomId, 'ar-tap');
       setPhase('finished');
+      return true;
     } catch (error) {
       showToast(
         error instanceof Error ? error.message : 'Could not finish the room.',
       );
+      return false;
     }
   }, [arSessionId, roomId, roomName, showToast]);
+
+  const handleFinish = useCallback(() => {
+    // Re-measuring a room that already has a plan replaces it — confirm first so an
+    // accidental navigation here cannot destroy a finished measurement. Cancelling
+    // keeps the trace on screen (session untouched) with the old plan intact.
+    if (roomId !== null && getPlan(roomId) !== null) {
+      Alert.alert(
+        'Replace existing plan?',
+        `Room "${roomName}" already has a saved plan. Replace it with this measurement?`,
+        [
+          { text: 'Keep old plan', style: 'cancel' },
+          { text: 'Replace', style: 'destructive', onPress: finishAndSave },
+        ],
+      );
+      return;
+    }
+    finishAndSave();
+  }, [finishAndSave, roomId, roomName]);
 
   const handleNextRoom = useCallback(() => {
     sessionRef.current!.clear();
     setPendingOpening(null);
     setMode('corner');
-    // The AR scene stays mounted so tracking (and the shared frame) continues;
-    // only the room bookkeeping resets.
-    const newId = createRoom();
-    setRoomId(newId);
-    setRoomName(getRoomLabel(newId) ?? '');
+    // The AR scene stays mounted so tracking (and the shared frame) continues; only
+    // the room bookkeeping resets. The next room is created lazily on its first
+    // corner tap, so leaving now leaves no empty card behind.
+    setRoomId(null);
+    setRoomName('');
     syncCorners();
     setPhase('ready');
   }, [syncCorners]);
 
   const handleDone = useCallback(() => {
+    if (roomId === null) return; // unreachable: Done is only reachable after a save
     router.push(`/blueprint?room=${roomId}`);
   }, [router, roomId]);
 
@@ -326,6 +399,7 @@ export function ArCaptureScreen() {
   }, []);
 
   const handleReferencePhotos = useCallback(() => {
+    if (roomId === null) return; // unreachable: the photo step follows a finished room
     setPhotos(getPhotos(roomId));
     setCameraReady(false);
     setCameraError(null);
@@ -349,6 +423,7 @@ export function ArCaptureScreen() {
           .toString(36)
           .slice(2, 8)}`,
       );
+      if (roomId === null) return; // unreachable: the photo step follows a finished room
       addPhoto(roomId, photo);
       setPhotos((prev) => [...prev, photo]);
     } catch (error) {
@@ -362,6 +437,7 @@ export function ArCaptureScreen() {
 
   const handleRemovePhoto = useCallback(
     (key: string) => {
+      if (roomId === null) return; // unreachable: the photo step follows a finished room
       removePhoto(roomId, key);
       setPhotos((prev) => prev.filter((photo) => photo.key !== key));
     },
@@ -383,15 +459,16 @@ export function ArCaptureScreen() {
     sessionRef.current!.clear();
     setPendingOpening(null);
     setMode('corner');
-    const newId = createRoom();
-    setRoomId(newId);
-    setRoomName(getRoomLabel(newId) ?? '');
+    // The next room is created lazily on its first corner tap (see handleNextRoom).
+    setRoomId(null);
+    setRoomName('');
     syncCorners();
     setPhotos([]);
     setPhase('ready');
   }, [syncCorners]);
 
   const handlePhotoDone = useCallback(() => {
+    if (roomId === null) return; // unreachable: the photo step follows a finished room
     router.push(`/blueprint?room=${roomId}`);
   }, [router, roomId]);
 
@@ -503,7 +580,13 @@ export function ArCaptureScreen() {
         )}
 
         <View
-          style={[styles.photoFooter, { backgroundColor: theme.background }]}
+          style={[
+            styles.photoFooter,
+            {
+              backgroundColor: theme.background,
+              paddingBottom: Spacing.three + insets.bottom,
+            },
+          ]}
         >
           <ThemedText variant="small" themeColor="textSecondary">
             Reference photos for your records — they do not change the measured
@@ -531,7 +614,7 @@ export function ArCaptureScreen() {
                 pressed && styles.pressed,
               ]}
             >
-              <Text style={styles.buttonLabel}>Next room (new AR session)</Text>
+              <Text style={styles.buttonLabel}>Next room</Text>
             </Pressable>
             <Pressable
               accessibilityRole="button"
@@ -616,7 +699,13 @@ export function ArCaptureScreen() {
 
         {pendingOpening !== null && (
           <View
-            style={[styles.openingPanel, { backgroundColor: theme.background }]}
+            style={[
+              styles.openingPanel,
+              {
+                backgroundColor: theme.background,
+                bottom: Spacing.four + insets.bottom,
+              },
+            ]}
           >
             <ThemedText variant="smallBold">
               Add opening on wall {pendingOpening.wallIndex + 1}
@@ -703,7 +792,12 @@ export function ArCaptureScreen() {
       </View>
 
       {phase === 'finished' ? (
-        <View style={styles.bottomBar}>
+        <View
+          style={[
+            styles.bottomBar,
+            { paddingBottom: Spacing.three + insets.bottom },
+          ]}
+        >
           <ThemedText variant="smallBold">
             Room measured ({cornerCount} corners)
           </ThemedText>
@@ -717,7 +811,7 @@ export function ArCaptureScreen() {
                 pressed && styles.pressed,
               ]}
             >
-              <Text style={styles.buttonLabel}>Next room (same session)</Text>
+              <Text style={styles.buttonLabel}>Next room</Text>
             </Pressable>
             <Pressable
               accessibilityRole="button"
@@ -746,9 +840,19 @@ export function ArCaptureScreen() {
               </Text>
             </Pressable>
           </View>
+          {/* The tracking-restart tradeoff is stated at the decision point, not buried. */}
+          <ThemedText variant="small" themeColor="textSecondary">
+            Tip: taking reference photos restarts tracking, so the next room
+            will need manual alignment when combined.
+          </ThemedText>
         </View>
       ) : (
-        <View style={styles.bottomBar}>
+        <View
+          style={[
+            styles.bottomBar,
+            { paddingBottom: Spacing.three + insets.bottom },
+          ]}
+        >
           <TextInput
             value={roomName}
             onChangeText={handleNameChange}
@@ -874,7 +978,8 @@ const styles = StyleSheet.create({
   photoFooter: {
     alignItems: 'center',
     gap: Spacing.two,
-    padding: Spacing.three,
+    paddingHorizontal: Spacing.three,
+    paddingTop: Spacing.three,
   },
   shutter: {
     width: 72,
@@ -902,7 +1007,8 @@ const styles = StyleSheet.create({
   },
   bottomBar: {
     gap: Spacing.two,
-    padding: Spacing.three,
+    paddingHorizontal: Spacing.three,
+    paddingTop: Spacing.three,
   },
   nameInput: {
     fontSize: 16,
