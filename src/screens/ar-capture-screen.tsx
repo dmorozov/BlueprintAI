@@ -40,6 +40,15 @@ import { ToastBubble } from '@/components/toast-bubble';
 import { Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { ArCaptureSession, type ArTrackingQuality } from '@/lib/ar-capture';
+import {
+  AR_LOG_FILTER,
+  INITIAL_AR_DIAGNOSTICS,
+  applyArLogLine,
+  resetEngineDiagnostics,
+  stalledReason,
+  trackingAdvice,
+  trackingLostReason,
+} from '@/lib/ar-diagnostics';
 import { preparePhoto, type ProcessedPhoto } from '@/lib/image-pipeline';
 import {
   addPhoto,
@@ -56,6 +65,8 @@ import {
 } from '@/lib/session-store';
 import { viroHitTestPoint, viroSafeStyle } from '@/lib/viro-interop';
 
+import ArSessionGuard from '../../modules/ar-session-guard';
+
 // Corner marker material (ViroReact geometry takes materials by registered name).
 // Guarded so a Viro version that throws here cannot break this module's evaluation —
 // the /ar-capture route loads this screen lazily for exactly that reason.
@@ -69,12 +80,18 @@ try {
 
 const TOAST_DURATION_MS = 2500;
 /**
- * A scene that has produced no tracking update at all after this long is treated as
- * dead: on some Android 16 devices Viro's camera surface never binds to the ARCore
- * session (upstream issue ReactVision/viro#499), so "Starting…" would otherwise last
- * forever over a black preview.
+ * An engine that has not tracked (limited or normal) this long after mounting is
+ * treated as dead. Viro swallows ARCore's failure statuses, so without this
+ * "Starting…" would last forever over a black preview.
  */
 const STALL_TIMEOUT_MS = 10000;
+/**
+ * How long the engine waits for expo-camera to release the camera before mounting
+ * anyway. The release took 1.4–1.5 s after leaving a camera screen on the S22 Ultra.
+ */
+const CAMERA_WAIT_TIMEOUT_MS = 3000;
+/** Shown for a stalled engine when no failure reason can be read (iOS, older builds). */
+const GENERIC_STALL_REASON = 'AR didn’t start. Tap Restart AR to try again.';
 
 type Phase =
   | 'checking'
@@ -100,7 +117,7 @@ interface PendingOpening {
 interface TracingSceneState {
   sceneRef: RefObject<ViroARScene | null>;
   cornerWorlds: [number, number, number][];
-  onTrackingUpdated: (state: number) => void;
+  onTrackingUpdated: (state: number, reason: number) => void;
   onSceneError: (message: string | undefined) => void;
 }
 
@@ -174,6 +191,8 @@ export function ArCaptureScreen() {
 
   const [phase, setPhase] = useState<Phase>('checking');
   const [trackingState, setTrackingState] = useState<number | null>(null);
+  // Viro's tracking-limited reason, reported alongside each tracking change.
+  const [trackingReason, setTrackingReason] = useState<number | null>(null);
   const [mode, setMode] = useState<TapMode>('corner');
   const [pendingOpening, setPendingOpening] = useState<PendingOpening | null>(
     null,
@@ -243,12 +262,62 @@ export function ArCaptureScreen() {
   // state where no other UI exists to recover from. Also bumped when the photo step
   // hands back to AR, so every fresh engine re-arms the stall timer below.
   const [sceneAttempt, setSceneAttempt] = useState(0);
-  // True once STALL_TIMEOUT_MS pass with zero tracking updates (dead session).
+  // The attempt whose camera wait has finished. Each engine mounts only after
+  // expo-camera (Capture, Photo assist or the reference-photo step) has released the
+  // camera, so ARCore gets it in an orderly hand-off instead of by evicting the older
+  // client. Without the guard module (iOS, older builds) the engine mounts at once.
+  const [cameraGate, setCameraGate] = useState<number | null>(null);
+  const cameraFree = ArSessionGuard === null || cameraGate === sceneAttempt;
+  useEffect(() => {
+    if (
+      ArSessionGuard === null ||
+      phase !== 'ready' ||
+      cameraGate === sceneAttempt
+    )
+      return;
+    let cancelled = false;
+    // A timeout or a failed call still mounts the engine.
+    void ArSessionGuard.awaitBackCameraAvailable(CAMERA_WAIT_TIMEOUT_MS)
+      .catch(() => null)
+      .then(() => {
+        if (!cancelled) setCameraGate(sceneAttempt);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [phase, sceneAttempt, cameraGate]);
+  // Whether this engine has ever tracked (limited or normal). Viro reports one
+  // forced "unavailable" at mount, and a session that never starts stays there
+  // without reporting anything else, so only real tracking proves it alive.
+  const [engineTracked, setEngineTracked] = useState(false);
+  // True once STALL_TIMEOUT_MS pass after the engine mounts without it ever
+  // tracking (dead session).
   const [stalled, setStalled] = useState(false);
   useEffect(() => {
+    if (!cameraFree || engineTracked) return;
     const timer = setTimeout(() => setStalled(true), STALL_TIMEOUT_MS);
     return () => clearTimeout(timer);
-  }, [sceneAttempt]);
+  }, [cameraFree, engineTracked, sceneAttempt]);
+  // Viro reports no failure to JS, so the guard module forwards the matching lines of
+  // the app's own logcat and ar-diagnostics turns them into reasons.
+  const [diagnostics, setDiagnostics] = useState(INITIAL_AR_DIAGNOSTICS);
+  useEffect(() => {
+    const guard = ArSessionGuard;
+    if (guard === null) return;
+    const subscription = guard.addListener('onArLog', ({ line }) =>
+      setDiagnostics((current) =>
+        applyArLogLine(current, line, guard.packageName),
+      ),
+    );
+    guard.startLogWatch(AR_LOG_FILTER);
+    return () => {
+      guard.stopLogWatch();
+      subscription.remove();
+    };
+  }, []);
+  // A failure the engine logged, or no tracking within STALL_TIMEOUT_MS: either way
+  // the user has to act (fix the named cause, or Restart AR).
+  const engineDead = diagnostics.failure !== null || stalled;
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -301,10 +370,13 @@ export function ArCaptureScreen() {
     [roomId],
   );
 
-  const handleTrackingUpdated = useCallback((state: number) => {
+  const handleTrackingUpdated = useCallback((state: number, reason: number) => {
     setTrackingState(state);
-    // Any tracking report — even "lost" — proves the session is alive.
-    setStalled(false);
+    setTrackingReason(reason);
+    if (state !== ViroTrackingStateConstants.TRACKING_UNAVAILABLE) {
+      setEngineTracked(true);
+      setStalled(false);
+    }
   }, []);
 
   const handleSceneError = useCallback(
@@ -343,11 +415,13 @@ export function ArCaptureScreen() {
       if (phase !== 'ready') return;
       const quality = qualityNow();
       if (quality === null) {
-        // A stalled session will not recover from motion — point at the restart.
+        // A dead engine will not recover from motion — point at the restart.
         showToast(
-          stalled
-            ? 'AR camera didn’t start — tap Restart AR.'
-            : 'Tracking lost — move the phone slowly and try again.',
+          engineDead
+            ? 'AR didn’t start — tap Restart AR.'
+            : engineTracked
+              ? 'Tracking lost — move the phone slowly and try again.'
+              : 'AR is still starting — move the phone slowly.',
         );
         return;
       }
@@ -403,7 +477,16 @@ export function ArCaptureScreen() {
         });
       }
     },
-    [stalled, ensureRoom, phase, mode, qualityNow, showToast, syncCorners],
+    [
+      engineDead,
+      engineTracked,
+      ensureRoom,
+      phase,
+      mode,
+      qualityNow,
+      showToast,
+      syncCorners,
+    ],
   );
 
   const handleUndo = useCallback(() => {
@@ -436,7 +519,10 @@ export function ArCaptureScreen() {
       setPendingOpening(null);
       setMode('corner');
       setTrackingState(null);
+      setTrackingReason(null);
+      setEngineTracked(false);
       setStalled(false);
+      setDiagnostics(resetEngineDiagnostics);
       syncCorners();
       setSceneAttempt((attempt) => attempt + 1);
     };
@@ -605,7 +691,10 @@ export function ArCaptureScreen() {
     // state (a stale "Tracking good" would hide a session that never starts) and
     // re-arm the stall timer, as Restart AR does.
     setTrackingState(null);
+    setTrackingReason(null);
+    setEngineTracked(false);
     setStalled(false);
+    setDiagnostics(resetEngineDiagnostics);
     setSceneAttempt((attempt) => attempt + 1);
     sessionRef.current!.clear();
     setPendingOpening(null);
@@ -788,17 +877,19 @@ export function ArCaptureScreen() {
     );
   }
 
-  // "Starting…" (not "Tracking lost") while no update has arrived yet — the two
-  // states need different recovery advice, and contradicting labels made the dead
-  // session look like a user error.
-  const trackingBadge =
-    trackingState === null
-      ? 'Starting AR…'
-      : trackingState === ViroTrackingStateConstants.TRACKING_NORMAL
-        ? 'Tracking good'
-        : trackingState === ViroTrackingStateConstants.TRACKING_LIMITED
-          ? 'Tracking limited — move slowly'
-          : 'Tracking lost';
+  // "Starting…" (not "Tracking lost") until the engine has tracked once — Viro's
+  // forced "unavailable" at mount is not a loss. The two states need different
+  // recovery advice, and contradicting labels made the dead session look like a
+  // user error.
+  const trackingBadge = !engineTracked
+    ? engineDead
+      ? 'AR didn’t start'
+      : 'Starting AR…'
+    : trackingState === ViroTrackingStateConstants.TRACKING_NORMAL
+      ? 'Tracking good'
+      : trackingState === ViroTrackingStateConstants.TRACKING_LIMITED
+        ? `Tracking limited — ${trackingAdvice(trackingReason)}`
+        : 'Tracking lost';
 
   return (
     <ThemedView style={styles.container}>
@@ -815,14 +906,16 @@ export function ArCaptureScreen() {
           {/* key remounts the navigator — a fresh AR engine and ARCore session — on
               Restart AR. provider="none" matches the Viro config plugin in app.json
               (the navigator otherwise defaults to ReactVision cloud anchors). */}
-          <TracingSceneContext.Provider value={tracingScene}>
-            <ViroARSceneNavigator
-              key={sceneAttempt}
-              initialScene={TRACING_SCENE}
-              provider="none"
-              style={viroSafeStyle({ flex: 1 })}
-            />
-          </TracingSceneContext.Provider>
+          {cameraFree && (
+            <TracingSceneContext.Provider value={tracingScene}>
+              <ViroARSceneNavigator
+                key={sceneAttempt}
+                initialScene={TRACING_SCENE}
+                provider="none"
+                style={viroSafeStyle({ flex: 1 })}
+              />
+            </TracingSceneContext.Provider>
+          )}
         </View>
 
         {/* Tap capture layer over the camera view. */}
@@ -851,10 +944,10 @@ export function ArCaptureScreen() {
 
         {/* Centered guidance when the session is not usable. Three states: still
             starting (brief), tracking reported but lost (recoverable by moving), and
-            stalled — no tracking report at all after STALL_TIMEOUT_MS, which on some
-            Android 16 devices means the AR camera never bound (Viro issue #499); that
-            one gets an explicit restart button. Taps pass through (box-none) except on
-            the button itself, so corner capture still works the moment it recovers. */}
+            a dead engine — a failure it logged, or no tracking report at all after
+            STALL_TIMEOUT_MS; that one names the reason and gets an explicit restart
+            button. Taps pass through (box-none) except on the button itself, so
+            corner capture still works the moment it recovers. */}
         {trackingState !== ViroTrackingStateConstants.TRACKING_NORMAL && (
           <View
             pointerEvents="box-none"
@@ -863,11 +956,14 @@ export function ArCaptureScreen() {
               { backgroundColor: theme.backgroundElement },
             ]}
           >
-            {stalled ? (
+            {engineDead ? (
               <>
                 <ThemedText variant="small">
-                  AR camera didn’t start. This can happen on some Android 16
-                  devices — restart the session to try again.
+                  {diagnostics.failure !== null
+                    ? diagnostics.failure.message
+                    : ArSessionGuard === null
+                      ? GENERIC_STALL_REASON
+                      : stalledReason(diagnostics, trackingReason)}
                 </ThemedText>
                 <Pressable
                   accessibilityRole="button"
@@ -884,9 +980,11 @@ export function ArCaptureScreen() {
               </>
             ) : (
               <ThemedText variant="small">
-                {trackingState === null
-                  ? 'Starting AR tracking — move the phone slowly.'
-                  : 'Tracking lost — move the phone slowly, or tap Restart AR below.'}
+                {!engineTracked
+                  ? cameraFree
+                    ? 'Starting AR tracking — move the phone slowly.'
+                    : 'Waiting for the camera…'
+                  : trackingLostReason(diagnostics, trackingReason)}
               </ThemedText>
             )}
           </View>
@@ -1139,8 +1237,8 @@ export function ArCaptureScreen() {
           </View>
           <ThemedText variant="small" themeColor="textSecondary">
             {trackingState !== ViroTrackingStateConstants.TRACKING_NORMAL
-              ? stalled
-                ? 'AR camera didn’t start — tap Restart AR.'
+              ? engineDead
+                ? 'AR didn’t start — tap Restart AR.'
                 : 'Tracking not active — move the phone slowly, or tap Restart AR.'
               : mode === 'corner'
                 ? `Tap each wall corner in order (${cornerCount} so far).`
