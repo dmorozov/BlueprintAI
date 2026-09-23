@@ -240,7 +240,8 @@ export function ArCaptureScreen() {
   const sceneRef = useRef<ViroARScene | null>(null);
   // Bumped by "Restart AR" to remount the navigator: a fresh AR engine gets a fresh
   // ARCore session and camera grab, which recovers the dead-preview / never-tracks
-  // state where no other UI exists to recover from.
+  // state where no other UI exists to recover from. Also bumped when the photo step
+  // hands back to AR, so every fresh engine re-arms the stall timer below.
   const [sceneAttempt, setSceneAttempt] = useState(0);
   // True once STALL_TIMEOUT_MS pass with zero tracking updates (dead session).
   const [stalled, setStalled] = useState(false);
@@ -600,6 +601,12 @@ export function ArCaptureScreen() {
     setArSessionId(
       `ar-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
     );
+    // The remounted engine has reported nothing yet. Drop the old engine's tracking
+    // state (a stale "Tracking good" would hide a session that never starts) and
+    // re-arm the stall timer, as Restart AR does.
+    setTrackingState(null);
+    setStalled(false);
+    setSceneAttempt((attempt) => attempt + 1);
     sessionRef.current!.clear();
     setPendingOpening(null);
     setMode('corner');

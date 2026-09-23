@@ -2,7 +2,7 @@
 
 Type: task
 Mode: HITL (user moves the phone; user may need to confirm Play Store restore)
-Status: open
+Status: resolved (2026-09-22, skipped)
 Blocked by: 02
 Part of: ../map.md
 
@@ -17,5 +17,14 @@ Steps:
 4. **Restore 1.56 the same session** (Play Store update or reinstall) and confirm versionName.
 
 Resolution records: whether 1.53 tracks where 1.56 did not (app and sample separately). A positive result confirms the platform regression and — since end users' ARCore version cannot be controlled — means the shipped fix must be the app-side workaround (ticket 04) or wait for Google's hotfix; it also unblocks ticket 17 (second device). If skipped or negative, close with the reason.
+
+## Answer
+
+**Skipped: the trigger did not occur (2026-09-22).** The ticket runs only if ticket 02 fails or ticket 01 shows `Failed to register sensor to queue`.
+- **Ticket 02 passed.** `hello_ar_kotlin` tracked on ARCore 1.56.262080393, and depth rendered.
+- **Ticket 01 found no sensor failure.** `Failed to register sensor` appears in none of the logs: 0 in ticket 01's six runs and ticket 00's 12 logs, and 0 in ticket 02's run 1.
+- **The Viro app tracks on 1.56** (16/16 launches in tickets 00 and 01), so there is no failure for a downgrade to fix.
+
+No APK was obtained and ARCore was not touched: the phone stays on 1.56.262080393. Because the bisect didn't run, ticket 17 (second device) is not unblocked. Ticket 17 is closed on ticket 02's result anyway.
 
 ## Comments
