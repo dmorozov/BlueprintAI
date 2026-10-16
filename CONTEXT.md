@@ -20,6 +20,14 @@ _Avoid_: photo analysis, AI assist, cloud assist
 The native component that supplies the live camera background, world tracking, tracking state, and hit-tests to AR tap-to-trace.
 _Avoid_: AR library, scene, Viro (as a concept — Viro is one engine)
 
+**Tracking frame**:
+The coordinate system one AR engine session measures in. Rooms traced in the same tracking frame line up without alignment; restarting the AR engine or taking reference photos starts a new one.
+_Avoid_: AR session (that is the engine's runtime), frame group, session id
+
+**Corner**:
+A point where two walls meet the floor, placed where the tap's line of sight meets the floor height of the room being traced.
+_Avoid_: corner tap (that is the user's action), vertex, hit point
+
 **Dead session**:
 An AR session that mounted but never started tracking (limited or good), whatever other states it reported. A session that tracked and then stopped is not dead; it has _tracking lost_.
 _Avoid_: dead camera, black camera, stalled session, tracking lost (that is a reported state, not a dead one)

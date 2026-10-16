@@ -959,8 +959,8 @@ export function ArCaptureScreen() {
             starting (brief), tracking reported but lost (recoverable by moving), and
             a dead session — a failure the engine logged, or no tracking at all
             after DEAD_SESSION_TIMEOUT_MS; that one names the reason and gets an
-            explicit restart button. Taps pass through (box-none) except on the button itself, so
-            corner capture still works the moment it recovers. */}
+            explicit restart button. Taps pass through (box-none) except on the
+            button itself, so corner capture still works the moment it recovers. */}
         {trackingState !== ViroTrackingStateConstants.TRACKING_NORMAL && (
           <View
             pointerEvents="box-none"
