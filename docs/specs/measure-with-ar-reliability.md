@@ -268,7 +268,11 @@ Phone: Samsung Galaxy S22 Ultra `SM-S908U`, Android 16, security patch 2026-08-0
   - **Viro is maintained by a small team that has not replied on the Android 16 issues.** Mitigated by the seam (one component to replace) and the documented fork (ticket 08). Track viro#499/#568.
   - **Log-string fragility:** the failure reasons depend on Viro's log text. Mitigated by fixture-based tests and a check on every upgrade (the missed space after `error:` in ticket 04 shows the risk).
   - **Release builds:** reading the app's own log there is unverified (plan row 9). If it fails, users get the generic reason and the 10 s catch-all.
-  - **Other Samsung Android 16 phones:** viro#568 (Galaxy A56) reports tracking flapping, and ARCore's #1784/#1785 report the camera-to-motion-sensor clock-offset issue. The S22U logged that offset warning once (−5.9 ms) without effect. There is no second test device.
+  - **Other Samsung Android 16 phones:**
+    - **viro#568 (Galaxy A56)** reports tracking that flaps about 10 times a second inside Viro while plain ARCore apps work on the same phone. So it is a Viro-specific failure that could hit other users' phones.
+    - **A candidate cause:** Viro always overrides ARCore's default camera config with the largest CPU image (1920×1080 on the S22U), in the `SessionNative` constructor. The ticket 06 reply asks the reporter to check; if it is confirmed, the fix is upstream or a one-change fork.
+    - **ARCore's own #1784/#1785** report a camera-to-motion-sensor clock-offset issue. The S22U logged that warning once (−5.9 ms) without effect.
+    - There is no second test device.
   - **ARCore updates arrive silently** (1.56 → 1.57 during this work). Re-run plan rows 1, 5 and 6 when the version changes.
   - **`facesUp` from Viro's hit pose is unverified;** step 4 checks it first.
   - **Single-device evidence,** and one length session (3 tries) under the final rule. Plan row 6 repeats it.

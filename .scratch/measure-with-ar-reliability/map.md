@@ -101,7 +101,7 @@ A decision-complete spec at `docs/specs/measure-with-ar-reliability.md`: the AR 
   - Criteria 1–3 pass on ticket 04's runs. Criterion 4 passes: a readable best guess is enough where ARCore's exact status is unreachable, and ticket 08's patch (a) is offered upstream (ticket 06) rather than forked.
   - Not controlling Viro is not a reason on its own; the `ArEngine` seam (ticket 15) is the hedge.
   - The Depth-API wall-tap requirement and metric scale get checked on Viro 2.58.1 first (ticket 19). Pass → 13 closes, 14 = keep Viro, 16 out of scope. Wall taps fail → 13 runs on wall taps. Length fails → diagnose first.
-  - Viro 3.0.2/3.0.3 change nothing relevant; the 3.0.3 upgrade (remount crash fix) goes into the spec. viro#568 (Samsung A56 flapping) matches ARCore's #1784/#1785, so it changes nothing; 06 replies on it.
+  - Viro 3.0.2/3.0.3 change nothing relevant; the 3.0.3 upgrade (remount crash fix) goes into the spec. viro#568 (Samsung A56 flapping) does not change the S22U decision; 06 replies on it. *Corrected in 06: it is Viro-specific (plain ARCore apps work on the A56), with Viro's forced largest-CPU-image camera config as a candidate cause, so it is a risk for other phones.*
   - Glossary: Dead session now means "never started tracking", whatever Viro reported.
 - [Prototype: owned ARCore Expo Module spike on the S22 Ultra](issues/13-owned-module-spike.md): **not needed (2026-10-15).** Ticket 19 passed on Viro, so no requirement is left that only an owned module could meet; tickets 09/10 stay on file as the replacement design.
 - [Decision: AR engine strategy (keep Viro / fork virocore / owned Expo Module)](issues/14-engine-strategy-decision.md): **keep Viro (2026-10-15)**, resolved by ticket 12's rule once ticket 19 passed.

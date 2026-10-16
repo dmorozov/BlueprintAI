@@ -2,7 +2,7 @@
 
 Type: task
 Mode: HITL (agent drafts, user posts under their GitHub account)
-Status: open
+Status: claimed
 Blocked by: 01, 02
 Part of: ../map.md
 
@@ -24,3 +24,9 @@ Resolution records the links to the posted comments and any maintainer response 
 - **2026-10-15, ticket 19 additions:**
   3. **Viro bug: depth hits are reported as `FeaturePoint`.** `HitResultNative::acquireTrackable` (`android/viroar/src/main/cpp/arcore/ARCore_Native.cpp`) returns `nullptr` for every trackable but a plane, so `VROARFrameARCore::hitTest`'s `DepthPoint` branch never runs and `hasDepthData` is always false on Android (v2.58.1 through `main`). Repro: `depthEnabled` on, tap a plain wall; ARCore returns a depth hit, JS sees `FeaturePoint`. Offer the one-line fix (wrap any trackable in `PlaneNative`, whose `getType` already maps `AR_TRACKABLE_DEPTH_POINT`). Fits as its own issue or a PR, cross-linked from #499.
   - For #568 (and ARCore #1784 if posting there after all): the S22U on Play Services for AR 1.57.262640093 logged `FEATURE_DSP_CAM_IMU_DESYNC` (camera-to-IMU clock offset −5.90 ms > 5 ms) once at start, with tracking otherwise normal and no flapping.
+- **2026-10-15, drafts ready for the user to post** (`../upstream/`; issues re-checked the same day: #499/#513 silent since 2026-08-24, #568 unanswered, no existing DepthPoint issue):
+  1. `1-viro-499-comment.md`: answers the maintainer's request for logcat. Our black view was app-side (no navigator); a quick log check for others; Viro drops `ArStatus` on create/resume/update and only logs `onRendererFailed`; offers patch (a) as a PR.
+  2. `1b-viro-513-crosslink.md`: a short pointer from #513 to the #499 comment.
+  3. `2-viro-depthpoint-issue.md`: a new issue. `acquireTrackable` returns `nullptr` for non-plane hits, so `DepthPoint` never reaches JS, and the non-plane `ArTrackable` leaks; a possible fix is included (not built).
+  4. `3-viro-568-comment.md`: S22U data (no flapping), and the answer to the reporter's camera-config question. Viro always selects the largest CPU image config; a test is suggested.
+  - **Correction found while drafting:** #568's reporter says plain ARCore apps work on the A56, so it is Viro-specific (ticket 12 corrected, spec risk updated).
