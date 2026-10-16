@@ -35,7 +35,7 @@ What the user sees:
 
 - AR reaches "Tracking good" within a few seconds.
 - Corners land on the floor even when the tap first hits something else.
-- Lengths are within 3% (measured: −1.8 / +1.3 / −2.8%).
+- Lengths are within 3% (ticket 19's three tape tries replayed through the rule: −0.1 / +2.9 / −1.3%).
 - Taps on a plain wall land on the wall.
 - Every failure says why and what to do.
 - After an interruption the app warns or refuses a corner, instead of drawing a wrong room.
@@ -164,11 +164,12 @@ interface ArEngineViewProps {
 
 ### Corners and the floor (tickets 15, 19)
 
-- **The floor height is locked per trace.** A trace (one room's corners) locks its floor height at its first corner tap that hits an upward-facing plane below the camera. That hit is the Corner.
+- **The floor height is locked per room.** A room locks its floor height at its first corner tap that hits an upward-facing plane below the camera. That hit is the Corner.
   - Before the lock, a tap uses its preferred hit (plane, then point), as today.
 - **After the lock,** a Corner is where the tap's line of sight meets the locked floor height. The line runs from the camera through the plane hit if there is one, else through the nearest hit.
-- **Why:** on ticket 19's tape taps, the hit point gave −7.8 / +1.0 / −39%; the floor-height rule gives −1.8 / +1.3 / −2.8%.
-- **The lock resets** with the trace: Clear, undo to zero corners, Next room, Restart AR, and the photo step → Next room.
+- **Why:** on ticket 19's tape taps (3 tries in one room, with Clear between them), the hit point gave −7.8 / +1.0 / −39%. The floor-height rule gives −0.1 / +2.9 / −1.3%.
+- **The lock lasts for the room.** Clear and Undo keep it. Next room, Restart AR, the photo step → Next room, and any new tracking frame reset it.
+  - Decided 2026-10-15, while implementing step 1: with a reset at Clear, try 3, where neither tap hit a floor plane, stayed at −46%.
 - **Openings** keep today's rule: the hit point, located on the nearest wall in plan.
 - **Implementation:** a pure `placeCorner(tap, floorY)` → `{ok: true, corner, floorY} | {ok: false, reason: 'no-hit' | 'floor-shifted'}`.
 
@@ -230,7 +231,7 @@ Each step is sized for one `/implement` session. Steps 1–4 are AFK code with a
    - Save rooms under `onFrameStart`'s id. Restart AR and the photo step get new frames through remounting.
    - Device: plan row 8.
 4. **Corner placement and tracking-loss rules** (0.5–1 day).
-   - Floor lock per trace, using `placeCorner` for corner taps.
+   - Floor lock per room, using `placeCorner` for corner taps.
    - The floor-shift refusal message and the long-loss keep/restart prompt.
    - Device: verify `facesUp` against logged plane-hit rotations, then plan rows 6 and 7.
 5. **Viro 3.0.3** (about 0.5 day plus a device session).

@@ -73,3 +73,9 @@ Deliver a TypeScript interface plus an adapter sketch (prototype stub, no wiring
   - **Walls:** take the depth or feature point (10/10 on the wall with depth on; 0/12 with depth off).
   - **Tracking loss:** after a long loss ARCore rebuilds its map and old planes stay at stale heights (six floor heights in one session), and a hit test can return several of them along one ray. The seam's lifecycle needs a "tracking was lost long enough that earlier corners are suspect" signal; Viro gives only the tracking state.
   - Today's first cut is `pickViroHit` in `src/lib/viro-interop.ts` (plane in extent, then point, then a plane's unbounded extension).
+- **2026-10-15, decision 5 amended while implementing spec step 1 (user's choice):** the floor height is kept **per room**, not per trace. Clear and Undo keep it; Next room, Restart AR, the photo step → Next room and a new tracking frame reset it. Replaying ticket 19's three tape tries (one room, Clear between tries) through `placeCorner`:
+  - with the reset at Clear: −0.1 / +1.4 / **−46%** (try 3 had no floor-plane hit);
+  - with the lock kept for the room: −0.1 / +2.9 / −1.3%.
+  
+  The "−1.8 / +1.3 / −2.8%" in decision 5 assumed a known floor height and is superseded; the spec is updated.
+- **2026-10-15, glossary (spec step 1 review, user's choice):** **Dead session** now also covers a session whose AR engine reported a failure after it had tracked (for example the #1762 sensor failure on resume). Either way it cannot track again without Restart AR, and `viroEngineStatus` maps a logged failure to `dead` whatever Viro reports.
