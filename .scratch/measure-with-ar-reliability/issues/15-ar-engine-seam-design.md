@@ -19,3 +19,10 @@ Define the interface `ar-capture-screen.tsx` codes against so any engine can be 
 Deliver a TypeScript interface plus an adapter sketch (prototype stub, no wiring), and decide it with the user. The seam is agreed in principle (Round 2, Q13); this ticket fixes its shape.
 
 ## Comments
+- **2026-10-15, ticket 12:** the seam is now the hedge for keeping Viro (not controlling Viro was ruled out as a reason to replace it). Ticket 19 settles the hit-selection rule's first cut (plane, then `DepthPoint`, then feature point) and whether depth is on by default.
+- **2026-10-15, ticket 19 (input for the hit rule and lifecycle):**
+  - Viro reports ARCore's depth hits as `FeaturePoint` (a Viro bug, ticket 06), so the adapter cannot tell depth from feature points today; the seam's `hit kind` should allow "point (depth or feature)" for Viro.
+  - **Floor corners:** place the tap where its ray meets the floor plane's height, not at the hit point. Hit points near the floor landed on objects 10–26 cm up (−8% and −39% length errors); the ray-at-floor-height gave −1.8 / +1.3 / −2.8%.
+  - **Walls:** take the depth or feature point (10/10 on the wall with depth on; 0/12 with depth off).
+  - **Tracking loss:** after a long loss ARCore rebuilds its map and old planes stay at stale heights (six floor heights in one session), and a hit test can return several of them along one ray. The seam's lifecycle needs a "tracking was lost long enough that earlier corners are suspect" signal; Viro gives only the tracking state.
+  - Today's first cut is `pickViroHit` in `src/lib/viro-interop.ts` (plane in extent, then point, then a plane's unbounded extension).

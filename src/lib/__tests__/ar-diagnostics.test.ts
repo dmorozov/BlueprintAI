@@ -5,7 +5,7 @@ import {
   INITIAL_AR_DIAGNOSTICS,
   applyArLogLine,
   resetEngineDiagnostics,
-  stalledReason,
+  deadSessionReason,
   trackingAdvice,
   trackingLostReason,
   type ArDiagnostics,
@@ -137,33 +137,33 @@ describe('resetEngineDiagnostics', () => {
   });
 });
 
-describe('stalledReason', () => {
+describe('deadSessionReason', () => {
   it('names another app holding the camera first', () => {
     const diagnostics = fold([
       ...HEALTHY_START,
       'I/CameraManagerGlobal( 6018): Camera 0 facing CAMERA_FACING_BACK state now CAMERA_STATE_OPEN for client com.other.app API Level 2 User Id 0Device Id 0',
     ]);
-    expect(stalledReason(diagnostics)).toContain('com.other.app');
+    expect(deadSessionReason(diagnostics)).toContain('com.other.app');
   });
 
   it('points at a dark or blocked camera when ARCore reports insufficient light', () => {
-    expect(stalledReason(fold(HEALTHY_START), 4)).toMatch(/dark or blank/);
-    expect(stalledReason(fold(HEALTHY_START), 1)).toMatch(
+    expect(deadSessionReason(fold(HEALTHY_START), 4)).toMatch(/dark or blank/);
+    expect(deadSessionReason(fold(HEALTHY_START), 1)).toMatch(
       /has not begun tracking/,
     );
   });
 
   it('says how far the start-up got', () => {
-    expect(stalledReason(INITIAL_AR_DIAGNOSTICS)).toMatch(
+    expect(deadSessionReason(INITIAL_AR_DIAGNOSTICS)).toMatch(
       /engine did not start/,
     );
-    expect(stalledReason(fold(HEALTHY_START.slice(0, 1)))).toMatch(
+    expect(deadSessionReason(fold(HEALTHY_START.slice(0, 1)))).toMatch(
       /did not respond/,
     );
-    expect(stalledReason(fold(HEALTHY_START.slice(0, 2)))).toMatch(
+    expect(deadSessionReason(fold(HEALTHY_START.slice(0, 2)))).toMatch(
       /could not create/,
     );
-    expect(stalledReason(fold(HEALTHY_START))).toMatch(
+    expect(deadSessionReason(fold(HEALTHY_START))).toMatch(
       /has not begun tracking/,
     );
   });

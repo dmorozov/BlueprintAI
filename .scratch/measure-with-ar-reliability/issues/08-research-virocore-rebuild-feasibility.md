@@ -62,3 +62,4 @@ Report: `../research/virocore-rebuild-feasibility.md`. It is in the map's resear
 - This choice belongs to ticket 12 / 14.
 
 ## Comments
+- **2026-10-15, correction from ticket 19:** patch (d) is **not** "already in 2.58.1" at runtime. ARCore's depth hits do reach JS, but `HitResultNative::acquireTrackable` returns `nullptr` for non-plane trackables, so `VROARFrameARCore::hitTest` labels them `FeaturePoint`; the `DepthPoint` mapping this report cited is unreachable (also in 3.0.3 and `main`). A fork that needs the label is one more line; the app does not need it today. Patch (b)'s device check is done (ticket 04: the camera shows before tracking).

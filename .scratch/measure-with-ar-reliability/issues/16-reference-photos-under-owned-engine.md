@@ -2,7 +2,7 @@
 
 Type: grilling
 Mode: HITL
-Status: open
+Status: resolved (out of scope, 2026-10-15)
 Blocked by: 14
 Part of: ../map.md
 
@@ -13,3 +13,5 @@ Part of: ../map.md
 **If ticket 14 keeps Viro:** close this ticket as not needed (the Track A camera-release guard stands) and leave one line in the map.
 
 ## Comments
+- **2026-10-15, ticket 12:** if ticket 19 passes, ticket 14 keeps Viro and this ticket goes out of scope by its own rule (the camera wait from ticket 04 stands).
+- **2026-10-15: out of scope by its own rule.** Ticket 14 kept Viro (ticket 19 passed), so the engine is not owned and reference photos stay on expo-camera behind ticket 04's camera wait.

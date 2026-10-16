@@ -2,8 +2,8 @@
 
 Type: prototype
 Mode: HITL (user moves the phone; agent builds)
-Status: open
-Blocked by: 02, 09, 10, 12
+Status: resolved (not needed, 2026-10-15)
+Blocked by: 02, 09, 10, 12, 19
 Part of: ../map.md
 
 ## Question
@@ -18,4 +18,9 @@ Build note: `com.google.ar:core:1.56.0` collides with Viro's bundled `arcore_cli
 
 This is evidence for ticket 14, not production code — throwaway branch, no polish. Record pass counts, logcat excerpts, the spike's branch, and the concrete Fabric/lifecycle problems hit.
 
+## Answer
+
+**Not needed (2026-10-15).** Ticket 19 passed: with depth on, Viro 2.58.1 put 10/10 plain-wall taps on the wall (within 4.5 cm of one plane), and ARCore's scale is within 3%. So no engine requirement is left that only an owned module could meet, and ticket 14 keeps Viro. The depth/plane data this spike was to collect came from ticket 19 instead (depth on vs off, hit types for walls and corners, `onDepthReady` 2 s after resume). Ticket 09's design and ticket 10's evaluation remain on file if Viro ever has to be replaced.
+
 ## Comments
+- **2026-10-15, ticket 12:** conditional on ticket 19. If Viro's wall taps pass, this ticket closes as not needed. If they fail, it runs, re-scoped to Depth-API wall taps directly on ARCore (hello_ar showed depth on a plain wall in ticket 02). The acceptance-bar runs and the GL-free design B are then only worth doing if ticket 14 leans to an owned module.

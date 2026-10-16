@@ -45,7 +45,7 @@ import {
   INITIAL_AR_DIAGNOSTICS,
   applyArLogLine,
   resetEngineDiagnostics,
-  stalledReason,
+  deadSessionReason,
   trackingAdvice,
   trackingLostReason,
 } from '@/lib/ar-diagnostics';
@@ -63,7 +63,11 @@ import {
   setPlan as saveRoomPlan,
   setPlanSource,
 } from '@/lib/session-store';
-import { viroHitTestPoint, viroSafeStyle } from '@/lib/viro-interop';
+import {
+  pickViroHit,
+  viroHitTestPoint,
+  viroSafeStyle,
+} from '@/lib/viro-interop';
 
 import ArSessionGuard from '../../modules/ar-session-guard';
 
@@ -84,14 +88,21 @@ const TOAST_DURATION_MS = 2500;
  * treated as dead. Viro swallows ARCore's failure statuses, so without this
  * "Starting…" would last forever over a black preview.
  */
-const STALL_TIMEOUT_MS = 10000;
+const DEAD_SESSION_TIMEOUT_MS = 10000;
 /**
  * How long the engine waits for expo-camera to release the camera before mounting
  * anyway. The release took 1.4–1.5 s after leaving a camera screen on the S22 Ultra.
  */
 const CAMERA_WAIT_TIMEOUT_MS = 3000;
-/** Shown for a stalled engine when no failure reason can be read (iOS, older builds). */
-const GENERIC_STALL_REASON = 'AR didn’t start. Tap Restart AR to try again.';
+/**
+ * Turns on ARCore's Depth API for hit tests, so a tap on a plain wall where no plane
+ * was detected still lands (as a `DepthPoint`). Viro falls back to no depth on phones
+ * that do not support it.
+ */
+const DEPTH_HITS_ENABLED = true;
+/** Shown for a dead session when no failure reason can be read (iOS, older builds). */
+const GENERIC_DEAD_SESSION_REASON =
+  'AR didn’t start. Tap Restart AR to try again.';
 
 type Phase =
   | 'checking'
@@ -260,7 +271,8 @@ export function ArCaptureScreen() {
   // Bumped by "Restart AR" to remount the navigator: a fresh AR engine gets a fresh
   // ARCore session and camera grab, which recovers the dead-preview / never-tracks
   // state where no other UI exists to recover from. Also bumped when the photo step
-  // hands back to AR, so every fresh engine re-arms the stall timer below.
+  // hands back to AR, so every fresh engine re-arms the dead-session timer
+  // below.
   const [sceneAttempt, setSceneAttempt] = useState(0);
   // The attempt whose camera wait has finished. Each engine mounts only after
   // expo-camera (Capture, Photo assist or the reference-photo step) has released the
@@ -290,12 +302,12 @@ export function ArCaptureScreen() {
   // forced "unavailable" at mount, and a session that never starts stays there
   // without reporting anything else, so only real tracking proves it alive.
   const [engineTracked, setEngineTracked] = useState(false);
-  // True once STALL_TIMEOUT_MS pass after the engine mounts without it ever
-  // tracking (dead session).
-  const [stalled, setStalled] = useState(false);
+  // True once DEAD_SESSION_TIMEOUT_MS pass after the engine mounts without it
+  // ever tracking (a dead session).
+  const [timedOut, setTimedOut] = useState(false);
   useEffect(() => {
     if (!cameraFree || engineTracked) return;
-    const timer = setTimeout(() => setStalled(true), STALL_TIMEOUT_MS);
+    const timer = setTimeout(() => setTimedOut(true), DEAD_SESSION_TIMEOUT_MS);
     return () => clearTimeout(timer);
   }, [cameraFree, engineTracked, sceneAttempt]);
   // Viro reports no failure to JS, so the guard module forwards the matching lines of
@@ -315,9 +327,9 @@ export function ArCaptureScreen() {
       subscription.remove();
     };
   }, []);
-  // A failure the engine logged, or no tracking within STALL_TIMEOUT_MS: either way
-  // the user has to act (fix the named cause, or Restart AR).
-  const engineDead = diagnostics.failure !== null || stalled;
+  // A failure the engine logged, or no tracking within DEAD_SESSION_TIMEOUT_MS:
+  // either way the user has to act (fix the named cause, or Restart AR).
+  const engineDead = diagnostics.failure !== null || timedOut;
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -375,7 +387,7 @@ export function ArCaptureScreen() {
     setTrackingReason(reason);
     if (state !== ViroTrackingStateConstants.TRACKING_UNAVAILABLE) {
       setEngineTracked(true);
-      setStalled(false);
+      setTimedOut(false);
     }
   }, []);
 
@@ -442,7 +454,7 @@ export function ArCaptureScreen() {
         showToast('Hit test failed — try again.');
         return;
       }
-      const hit = results[0];
+      const hit = pickViroHit(results);
       if (hit === undefined) {
         showToast(
           'No surface detected — aim at the corner and move around slowly.',
@@ -521,7 +533,7 @@ export function ArCaptureScreen() {
       setTrackingState(null);
       setTrackingReason(null);
       setEngineTracked(false);
-      setStalled(false);
+      setTimedOut(false);
       setDiagnostics(resetEngineDiagnostics);
       syncCorners();
       setSceneAttempt((attempt) => attempt + 1);
@@ -689,11 +701,11 @@ export function ArCaptureScreen() {
     );
     // The remounted engine has reported nothing yet. Drop the old engine's tracking
     // state (a stale "Tracking good" would hide a session that never starts) and
-    // re-arm the stall timer, as Restart AR does.
+    // re-arm the dead-session timer, as Restart AR does.
     setTrackingState(null);
     setTrackingReason(null);
     setEngineTracked(false);
-    setStalled(false);
+    setTimedOut(false);
     setDiagnostics(resetEngineDiagnostics);
     setSceneAttempt((attempt) => attempt + 1);
     sessionRef.current!.clear();
@@ -912,6 +924,7 @@ export function ArCaptureScreen() {
                 key={sceneAttempt}
                 initialScene={TRACING_SCENE}
                 provider="none"
+                depthEnabled={DEPTH_HITS_ENABLED}
                 style={viroSafeStyle({ flex: 1 })}
               />
             </TracingSceneContext.Provider>
@@ -944,9 +957,9 @@ export function ArCaptureScreen() {
 
         {/* Centered guidance when the session is not usable. Three states: still
             starting (brief), tracking reported but lost (recoverable by moving), and
-            a dead engine — a failure it logged, or no tracking report at all after
-            STALL_TIMEOUT_MS; that one names the reason and gets an explicit restart
-            button. Taps pass through (box-none) except on the button itself, so
+            a dead session — a failure the engine logged, or no tracking at all
+            after DEAD_SESSION_TIMEOUT_MS; that one names the reason and gets an
+            explicit restart button. Taps pass through (box-none) except on the button itself, so
             corner capture still works the moment it recovers. */}
         {trackingState !== ViroTrackingStateConstants.TRACKING_NORMAL && (
           <View
@@ -962,8 +975,8 @@ export function ArCaptureScreen() {
                   {diagnostics.failure !== null
                     ? diagnostics.failure.message
                     : ArSessionGuard === null
-                      ? GENERIC_STALL_REASON
-                      : stalledReason(diagnostics, trackingReason)}
+                      ? GENERIC_DEAD_SESSION_REASON
+                      : deadSessionReason(diagnostics, trackingReason)}
                 </ThemedText>
                 <Pressable
                   accessibilityRole="button"

@@ -21,5 +21,5 @@ The native component that supplies the live camera background, world tracking, t
 _Avoid_: AR library, scene, Viro (as a concept — Viro is one engine)
 
 **Dead session**:
-An AR session that mounted but never reported any tracking state, leaving a black camera view with no way forward.
+An AR session that mounted but never started tracking (limited or good), whatever other states it reported. A session that tracked and then stopped is not dead; it has _tracking lost_.
 _Avoid_: dead camera, black camera, stalled session, tracking lost (that is a reported state, not a dead one)

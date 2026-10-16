@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   VIRO_STYLE_COLLISION_KEYS,
+  pickViroHit,
   viroHitTestPoint,
   viroSafeStyle,
 } from '@/lib/viro-interop';
@@ -97,5 +98,52 @@ describe('viroHitTestPoint', () => {
         { os: 'ios', pixelRatio: 3 },
       ),
     ).toEqual([120.4, 250.1]);
+  });
+});
+
+describe('pickViroHit', () => {
+  type HitType = Parameters<typeof pickViroHit>[0][number]['type'];
+  const hit = (type: HitType, x: number) => ({
+    type,
+    transform: {
+      position: [x, 0, 0] as [number, number, number],
+      rotation: [0, 0, 0] as [number, number, number],
+      scale: [1, 1, 1] as [number, number, number],
+    },
+    hasDepthData: type === 'DepthPoint',
+  });
+
+  it('prefers a hit inside a detected plane over nearer depth and feature points', () => {
+    const chosen = pickViroHit([
+      hit('FeaturePoint', 1),
+      hit('DepthPoint', 2),
+      hit('ExistingPlaneUsingExtent', 3),
+    ]);
+    expect(chosen?.type).toBe('ExistingPlaneUsingExtent');
+  });
+
+  it('prefers a depth point over a feature point', () => {
+    expect(
+      pickViroHit([hit('FeaturePoint', 1), hit('DepthPoint', 2)])?.type,
+    ).toBe('DepthPoint');
+  });
+
+  it('ranks a plane extension last: it can lie behind the tapped wall', () => {
+    expect(
+      pickViroHit([hit('EstimatedHorizontalPlane', 1), hit('FeaturePoint', 2)])
+        ?.type,
+    ).toBe('FeaturePoint');
+    expect(pickViroHit([hit('EstimatedHorizontalPlane', 1)])?.type).toBe(
+      'EstimatedHorizontalPlane',
+    );
+  });
+
+  it('keeps the engine order (nearest first) within a type', () => {
+    const chosen = pickViroHit([hit('DepthPoint', 1), hit('DepthPoint', 2)]);
+    expect(chosen?.transform.position[0]).toBe(1);
+  });
+
+  it('returns undefined when nothing was hit', () => {
+    expect(pickViroHit([])).toBeUndefined();
   });
 });

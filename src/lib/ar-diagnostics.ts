@@ -181,10 +181,10 @@ export function resetEngineDiagnostics(
 const TRACKING_REASON_INSUFFICIENT_LIGHT = 4;
 
 /**
- * The reason shown when the engine has not tracked within the stall timeout, from how
+ * The reason shown when the engine has not tracked within the dead-session timeout, from how
  * far its start-up got and Viro's latest tracking reason.
  */
-export function stalledReason(
+export function deadSessionReason(
   diagnostics: ArDiagnostics,
   trackingReason: number | null = null,
 ): string {
