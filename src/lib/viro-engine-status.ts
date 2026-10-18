@@ -23,6 +23,12 @@ export interface ViroEngineReport {
   logReasonsAvailable: boolean;
   /** False while the engine waits for the back camera before mounting. */
   cameraFree: boolean;
+  /**
+   * True from the app going to the background until Viro reports tracking again after
+   * it comes back (or the engine component gives up waiting). Viro's last state
+   * predates the pause, and on resume it reports "unavailable" before tracking returns.
+   */
+  resuming: boolean;
 }
 
 // ViroTrackingStateConstants. Not imported: Viro's runtime module cannot load outside
@@ -49,6 +55,9 @@ export function viroEngineStatus(report: ViroEngineReport): ArEngineStatus {
         ? deadSessionReason(report.diagnostics, report.trackingReason)
         : GENERIC_DEAD_SESSION_REASON,
     };
+  }
+  if (report.resuming) {
+    return { kind: 'starting', waitingForCamera: false };
   }
   if (report.trackingState === TRACKING_NORMAL) {
     return { kind: 'tracking', quality: 'normal', advice: null };

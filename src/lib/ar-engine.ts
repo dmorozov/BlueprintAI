@@ -16,7 +16,8 @@ export type Vec3 = [number, number, number];
 /** What the engine is doing, as the screen shows it. */
 export type ArEngineStatus =
   /**
-   * Mounted, not tracked yet, and not yet a dead session. `waitingForCamera`: the
+   * Mounted, not tracked yet, and not yet a dead session; or back from the background
+   * and not tracking again yet (the same session and frame). `waitingForCamera`: the
    * engine is waiting for another camera user (expo-camera, another app) to let go.
    */
   | { kind: 'starting'; waitingForCamera: boolean }

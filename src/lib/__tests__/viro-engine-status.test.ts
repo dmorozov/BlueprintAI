@@ -31,6 +31,7 @@ const base = {
   diagnostics: INITIAL_AR_DIAGNOSTICS,
   logReasonsAvailable: true,
   cameraFree: true,
+  resuming: false,
 };
 
 describe('viroEngineStatus', () => {
@@ -96,6 +97,44 @@ describe('viroEngineStatus', () => {
     expect(status.kind === 'lost' && status.reason).toMatch(
       /^Tracking lost — .*Restart AR/,
     );
+  });
+
+  it('is starting, not lost, through Viro’s "unavailable" when the app comes back', () => {
+    // Back from Home on the S22 Ultra, Viro reported "unavailable" 0.3–0.4 s after
+    // "AR session resumed", then normal tracking 0.8–0.9 s later.
+    expect(
+      viroEngineStatus({
+        ...base,
+        trackingState: UNAVAILABLE,
+        engineTracked: true,
+        resuming: true,
+      }),
+    ).toEqual({ kind: 'starting', waitingForCamera: false });
+  });
+
+  it('is starting in the background, though Viro last reported normal', () => {
+    expect(
+      viroEngineStatus({
+        ...base,
+        trackingState: NORMAL,
+        engineTracked: true,
+        resuming: true,
+      }),
+    ).toEqual({ kind: 'starting', waitingForCamera: false });
+  });
+
+  it('is a dead session when the engine logs a failure while resuming', () => {
+    const diagnostics = fold([
+      'E/Viro    ( 6018): onRendererFailed [error: ARCORE_NEEDS_UPDATE], message [ARCore needs update]',
+    ]);
+    const status = viroEngineStatus({
+      ...base,
+      trackingState: UNAVAILABLE,
+      engineTracked: true,
+      resuming: true,
+      diagnostics,
+    });
+    expect(status.kind).toBe('dead');
   });
 
   it('is tracking normally with no advice', () => {

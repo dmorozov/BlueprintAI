@@ -1,22 +1,22 @@
 # Implementation progress — Measure with AR reliability
 
 Spec: `docs/specs/measure-with-ar-reliability.md` (Implementation Steps 1–6, device test plan rows 1–9).
-Step 2's device smoke test ran on 2026-10-17: all planned rows pass. Next: the user reviews the deviations below and commits step 2.
+Steps 2 and 3 are committed (`6cddb3f`). The fix for the "Tracking lost" flash after Home is uncommitted (see below). Next: step 4.
 
 ## Where things stand
 
 | Spec step | State |
 |---|---|
 | 1. Seam types and pure logic | **Done, committed** (`6bbe482 step 1`) |
-| 2. `ViroArEngineView` | **Code done, device smoke passed (2026-10-17); uncommitted** |
-| 3. Tracking frames | **Code done as part of step 2** (uncommitted); plan row 8 passed |
+| 2. `ViroArEngineView` | **Done, committed** (`6cddb3f`); device smoke passed 2026-10-17 |
+| 3. Tracking frames | **Done with step 2, committed** (`6cddb3f`); plan row 8 passed |
 | 4. Corner placement + tracking-loss rules | Not started |
 | 5. Viro 3.0.3 | Not started |
 | 6. Release-build check | Not started |
 
 Also open: **ticket 06**. The four upstream drafts in `upstream/` are waiting to be posted. Send the comment and issue links back so they can be recorded on the ticket and it can be closed.
 
-## Step 2 working tree (uncommitted)
+## Step 2 (committed in `6cddb3f`)
 
 All checks pass: `npm test` (103 tests), `npm run lint`, `npm run typecheck`, `npx prettier --check src CONTEXT.md`.
 
@@ -53,7 +53,7 @@ S22U `R5CTA2PB2ZX`, debug dev client over Metro, Play Services for AR 1.57.26264
 The phone state before and after matches, apart from the header timestamp.
 
 **Observations for the user's review (none blocks the commit):**
-- **About 1 s of "Tracking lost" after returning from Home.** On each resume Viro reports `unavailable`. The engine had already tracked, so the status is `lost`, and the guidance card shows "Tracking lost — move the phone slowly, or tap Restart AR below." for 0.8–0.9 s before "Tracking good". This could be shown as `starting` instead, which would need a resume signal in the engine view.
+- **About 1 s of "Tracking lost" after returning from Home.** On each resume Viro reports `unavailable`. The engine had already tracked, so the status was `lost`, and the guidance card showed "Tracking lost — move the phone slowly, or tap Restart AR below." for 0.8–0.9 s before "Tracking good". **Fixed, see the next section.**
 - **A flash of `waitingForCamera` at every mount.** `cameraFree` starts false, so the status shows `waitingForCamera: true` for about 30–40 ms until `awaitBackCameraAvailable` resolves. The badge stays "Starting AR…"; only the centre card's text flips for a frame or two.
 - **A young session held still has nothing to hit.** After a cold start with the phone held still, the first 4 taps (3–16 s after "Tracking good") got `raw=[]` from Viro, which shows the "No surface detected" toast. Feature-point hits started about 19 s in. After Restart AR with the phone moving, the first tap (about 3 s in) hit `ExistingPlaneUsingExtent`. `raw=[]` means this is not caused by `toArHit` dropping `EstimatedHorizontalPlane`; none was seen in any tap. This is worth considering for step 4's guidance.
 - **Hit types seen on the phone:** `ExistingPlaneUsingExtent` and `FeaturePoint` only.
@@ -61,6 +61,23 @@ The phone state before and after matches, apart from the header timestamp.
 **Test-harness notes:**
 - While tracking was `lost`, uiautomator twice failed to find the Restart AR chip by its content-desc, so it was tapped by its coordinates. It was found normally a few seconds later.
 - A first row 8 attempt was discarded: the screen was left (a back tap between runs) and re-entered, which gives a new frame without Restart AR.
+
+## Fix: no "Tracking lost" flash after Home (uncommitted)
+
+- **`viroEngineStatus`** takes a new `resuming` input. While it is set, a session that has tracked is `starting` (not `lost`, and not Viro's stale pre-pause `tracking`). A logged failure still wins: the status is `dead`.
+- **`ViroArEngineView`** keeps `resume: 'none' | 'paused' | 'resuming'`:
+  - AppState `background` → `paused`;
+  - `active` → `resuming`;
+  - Viro's first limited or normal report in the foreground → `none`;
+  - `RESUME_TIMEOUT_MS` (5 s) after the return → `none`, so a resume that never tracks falls back to `lost` with its reason.
+  - iOS's `inactive` is ignored: ARKit keeps running through it.
+- **`ArEngineStatus.starting`'s doc** now covers "back from the background, not tracking again yet".
+- **Tests:** 3 new cases in `viro-engine-status.test.ts` (106 total). Lint, typecheck and prettier are clean.
+- **Device check (2026-10-17, temporary `[ar-trace]` line, since removed):**
+  - **Row 2, ×3:** `tracking` → `starting` 0.2 s after Home → "Tracking good" 1.52–1.57 s after returning. Never `lost`; same session and frame (`logs/step-2/bgfg-*`). The runs before the fix are in `logs/step-2/before-resume-fix/`.
+  - **Fallback (camera covered, Home 3 s, back):** `starting` until 5.5 s after the return, then "Tracking lost — too dark, turn on a light, or tap Restart AR below.", then "Tracking good" after uncovering. Same frame (`logs/step-2/bgfg-covered.logcat.txt`).
+  - The phone state matches the baseline again.
+- **For step 4:** the background trip now shows as `starting` (from Home until tracking returns), not as `lost`. So the long-loss warning (≥ 3 s) should count any non-tracking status after the session has tracked, `starting` included. Otherwise a Home trip mid-trace never warns.
 
 ## After that
 

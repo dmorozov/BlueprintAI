@@ -20,7 +20,7 @@ import {
   type Ref,
   type RefObject,
 } from 'react';
-import { PixelRatio, Platform } from 'react-native';
+import { AppState, PixelRatio, Platform } from 'react-native';
 
 import {
   AR_LOG_FILTER,
@@ -61,6 +61,12 @@ const DEAD_SESSION_TIMEOUT_MS = 10000;
  * anyway. The release took 1.4–1.5 s after leaving a camera screen on the S22 Ultra.
  */
 const CAMERA_WAIT_TIMEOUT_MS = 3000;
+/**
+ * How long a session back from the background may take to track again before Viro's
+ * "unavailable" counts as a loss. Tracking returned 1.5–2.8 s after the app came back
+ * on the S22 Ultra.
+ */
+const RESUME_TIMEOUT_MS = 5000;
 /**
  * Turns on ARCore's Depth API for hit tests, so a tap on a plain wall where no plane
  * was detected still lands (10 of 10 on the S22 Ultra, 0 of 12 without). Viro falls
@@ -155,6 +161,10 @@ export function ViroArEngineView({
   // normal) proves the engine alive.
   const [engineTracked, setEngineTracked] = useState(false);
   const [timedOut, setTimedOut] = useState(false);
+  // Viro pauses ARCore in the background and, back in the foreground, reports
+  // "unavailable" before tracking returns. Until it tracks again, or the resume
+  // timeout passes, the session is resuming, not lost.
+  const [resume, setResume] = useState<'none' | 'paused' | 'resuming'>('none');
   const [diagnostics, setDiagnostics] = useState(INITIAL_AR_DIAGNOSTICS);
 
   useEffect(() => {
@@ -200,6 +210,24 @@ export function ViroArEngineView({
     return () => clearTimeout(timer);
   }, [cameraFree, engineTracked]);
 
+  // Only "background" pauses the session: iOS's "inactive" (Control Center, an
+  // incoming call banner) leaves ARKit running, and Android never reports it.
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', (state) => {
+      if (state === 'background') setResume('paused');
+      if (state === 'active') {
+        setResume((current) => (current === 'paused' ? 'resuming' : current));
+      }
+    });
+    return () => subscription.remove();
+  }, []);
+
+  useEffect(() => {
+    if (resume !== 'resuming') return;
+    const timer = setTimeout(() => setResume('none'), RESUME_TIMEOUT_MS);
+    return () => clearTimeout(timer);
+  }, [resume]);
+
   const status = useMemo(
     () =>
       viroEngineStatus({
@@ -210,11 +238,13 @@ export function ViroArEngineView({
         diagnostics,
         logReasonsAvailable: ArSessionGuard !== null,
         cameraFree,
+        resuming: resume !== 'none',
       }),
     [
       cameraFree,
       diagnostics,
       engineTracked,
+      resume,
       timedOut,
       trackingReason,
       trackingState,
@@ -259,6 +289,8 @@ export function ViroArEngineView({
     setTrackingReason(reason);
     if (state !== ViroTrackingStateConstants.TRACKING_UNAVAILABLE) {
       setEngineTracked(true);
+      // Only in the foreground: a report in the background does not end the pause.
+      setResume((current) => (current === 'resuming' ? 'none' : current));
     }
   }, []);
 
