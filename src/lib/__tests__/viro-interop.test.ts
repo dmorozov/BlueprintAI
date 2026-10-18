@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   VIRO_STYLE_COLLISION_KEYS,
-  pickViroHit,
+  toArHit,
   viroHitTestPoint,
   viroSafeStyle,
 } from '@/lib/viro-interop';
@@ -101,49 +101,52 @@ describe('viroHitTestPoint', () => {
   });
 });
 
-describe('pickViroHit', () => {
-  type HitType = Parameters<typeof pickViroHit>[0][number]['type'];
-  const hit = (type: HitType, x: number) => ({
+describe('toArHit', () => {
+  type ViroHitType = Parameters<typeof toArHit>[0]['type'];
+  const viroHit = (
+    type: ViroHitType,
+    rotation: [number, number, number] = [0, 0, 0],
+  ) => ({
     type,
     transform: {
-      position: [x, 0, 0] as [number, number, number],
-      rotation: [0, 0, 0] as [number, number, number],
+      position: [0.5, -1.6, -1] as [number, number, number],
+      rotation,
       scale: [1, 1, 1] as [number, number, number],
     },
-    hasDepthData: type === 'DepthPoint',
+    hasDepthData: false,
   });
 
-  it('prefers a hit inside a detected plane over nearer depth and feature points', () => {
-    const chosen = pickViroHit([
-      hit('FeaturePoint', 1),
-      hit('DepthPoint', 2),
-      hit('ExistingPlaneUsingExtent', 3),
-    ]);
-    expect(chosen?.type).toBe('ExistingPlaneUsingExtent');
+  it('maps a hit inside a detected plane to a plane hit', () => {
+    expect(toArHit(viroHit('ExistingPlaneUsingExtent'))).toEqual({
+      kind: 'plane',
+      position: [0.5, -1.6, -1],
+      facesUp: true,
+    });
   });
 
-  it('prefers a depth point over a feature point', () => {
-    expect(
-      pickViroHit([hit('FeaturePoint', 1), hit('DepthPoint', 2)])?.type,
-    ).toBe('DepthPoint');
+  it('maps feature and depth points to point hits', () => {
+    for (const type of ['FeaturePoint', 'DepthPoint'] as const) {
+      expect(toArHit(viroHit(type))).toEqual({
+        kind: 'point',
+        position: [0.5, -1.6, -1],
+        facesUp: false,
+      });
+    }
   });
 
-  it('ranks a plane extension last: it can lie behind the tapped wall', () => {
-    expect(
-      pickViroHit([hit('EstimatedHorizontalPlane', 1), hit('FeaturePoint', 2)])
-        ?.type,
-    ).toBe('FeaturePoint');
-    expect(pickViroHit([hit('EstimatedHorizontalPlane', 1)])?.type).toBe(
-      'EstimatedHorizontalPlane',
-    );
+  it('drops hits on a plane’s unbounded extension, which can lie behind a wall', () => {
+    expect(toArHit(viroHit('EstimatedHorizontalPlane'))).toBeNull();
+    expect(toArHit(viroHit('ExistingPlane'))).toBeNull();
   });
 
-  it('keeps the engine order (nearest first) within a type', () => {
-    const chosen = pickViroHit([hit('DepthPoint', 1), hit('DepthPoint', 2)]);
-    expect(chosen?.transform.position[0]).toBe(1);
-  });
-
-  it('returns undefined when nothing was hit', () => {
-    expect(pickViroHit([])).toBeUndefined();
+  // Provisional: ARCore gives a horizontal plane's pose a yaw only and a wall's pose a
+  // 90° tilt. Spec step 4 checks this against rotations recorded on the phone.
+  it('tells floor-like planes from walls by the hit pose’s tilt', () => {
+    const facesUp = (rotation: [number, number, number]) =>
+      toArHit(viroHit('ExistingPlaneUsingExtent', rotation))?.facesUp;
+    expect(facesUp([0, 37, 0])).toBe(true);
+    expect(facesUp([4, -120, -6])).toBe(true);
+    expect(facesUp([90, 0, 0])).toBe(false);
+    expect(facesUp([0, 15, -90])).toBe(false);
   });
 });

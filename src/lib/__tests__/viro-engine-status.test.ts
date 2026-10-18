@@ -30,12 +30,21 @@ const base = {
   timedOut: false,
   diagnostics: INITIAL_AR_DIAGNOSTICS,
   logReasonsAvailable: true,
+  cameraFree: true,
 };
 
 describe('viroEngineStatus', () => {
   it('is starting through Viro’s forced "unavailable" at mount', () => {
     expect(viroEngineStatus({ ...base, trackingState: UNAVAILABLE })).toEqual({
       kind: 'starting',
+      waitingForCamera: false,
+    });
+  });
+
+  it('is starting and waiting while another camera user releases the camera', () => {
+    expect(viroEngineStatus({ ...base, cameraFree: false })).toEqual({
+      kind: 'starting',
+      waitingForCamera: true,
     });
   });
 

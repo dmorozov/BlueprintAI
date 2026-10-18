@@ -167,16 +167,6 @@ export function applyArLogLine(
   return diagnostics;
 }
 
-/** A fresh engine starts over; which app holds a camera is device state, so it stays. */
-export function resetEngineDiagnostics(
-  diagnostics: ArDiagnostics,
-): ArDiagnostics {
-  return {
-    ...INITIAL_AR_DIAGNOSTICS,
-    foreignCameraClients: diagnostics.foreignCameraClients,
-  };
-}
-
 /** Viro's tracking reason for "insufficient light" (native-only, not in its TS enum). */
 const TRACKING_REASON_INSUFFICIENT_LIGHT = 4;
 

@@ -21,6 +21,8 @@ export interface ViroEngineReport {
   diagnostics: ArDiagnostics;
   /** False where no log tail exists (iOS, builds without the guard module). */
   logReasonsAvailable: boolean;
+  /** False while the engine waits for the back camera before mounting. */
+  cameraFree: boolean;
 }
 
 // ViroTrackingStateConstants. Not imported: Viro's runtime module cannot load outside
@@ -38,7 +40,9 @@ export function viroEngineStatus(report: ViroEngineReport): ArEngineStatus {
     return { kind: 'dead', reason: report.diagnostics.failure.message };
   }
   if (!report.engineTracked) {
-    if (!report.timedOut) return { kind: 'starting' };
+    if (!report.timedOut) {
+      return { kind: 'starting', waitingForCamera: !report.cameraFree };
+    }
     return {
       kind: 'dead',
       reason: report.logReasonsAvailable

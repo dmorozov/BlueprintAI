@@ -4,7 +4,6 @@ import {
   AR_LOG_FILTER,
   INITIAL_AR_DIAGNOSTICS,
   applyArLogLine,
-  resetEngineDiagnostics,
   deadSessionReason,
   trackingAdvice,
   trackingLostReason,
@@ -119,21 +118,6 @@ describe('applyArLogLine', () => {
     const line =
       'I/CameraManagerGlobal( 6018): Camera 20 facing CAMERA_FACING_BACK state now CAMERA_STATE_CLOSED for client com.sec.android.app.camera API Level 2 User Id 0Device Id 0';
     expect(fold([line])).toBe(INITIAL_AR_DIAGNOSTICS);
-  });
-});
-
-describe('resetEngineDiagnostics', () => {
-  it('forgets the engine but keeps camera clients', () => {
-    const diagnostics = fold([
-      ...HEALTHY_START,
-      'E/Viro    ( 6018): onRendererFailed [error: ARCORE_TRANSIENT], message []',
-      'I/CameraManagerGlobal( 6018): Camera 0 facing CAMERA_FACING_BACK state now CAMERA_STATE_OPEN for client com.other.app API Level 2 User Id 0Device Id 0',
-    ]);
-    expect(resetEngineDiagnostics(diagnostics)).toEqual({
-      milestones: [],
-      failure: null,
-      foreignCameraClients: { '0': 'com.other.app' },
-    });
   });
 });
 

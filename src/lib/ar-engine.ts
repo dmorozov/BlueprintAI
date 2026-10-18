@@ -15,8 +15,11 @@ export type Vec3 = [number, number, number];
 
 /** What the engine is doing, as the screen shows it. */
 export type ArEngineStatus =
-  /** Mounted, not tracked yet, and not yet a dead session. */
-  | { kind: 'starting' }
+  /**
+   * Mounted, not tracked yet, and not yet a dead session. `waitingForCamera`: the
+   * engine is waiting for another camera user (expo-camera, another app) to let go.
+   */
+  | { kind: 'starting'; waitingForCamera: boolean }
   | {
       kind: 'tracking';
       quality: ArTrackingQuality;
@@ -47,6 +50,9 @@ export interface ArTap {
   camera: Vec3;
 }
 
+/** Whether AR measuring can start on this phone, checked before an engine mounts. */
+export type ArReadiness = 'ready' | 'unsupported' | 'denied';
+
 /** Imperative calls on a mounted engine (a React ref). */
 export interface ArEngineHandle {
   /** Hit-tests a point of the engine view, in React Native units relative to the view. */
@@ -63,6 +69,15 @@ export interface ArEngineViewProps {
   onStatusChange: (status: ArEngineStatus) => void;
   /** Once per engine session, before any tracking: the id of its new tracking frame. */
   onFrameStart: (frameId: string) => void;
+}
+
+/**
+ * The hit a tap means when no floor rule applies (openings, and corners before the
+ * room has a floor height): a detected plane, which lies exactly on the line of sight,
+ * else the nearest hit, which only lies near it.
+ */
+export function preferredHit(tap: ArTap): ArHit | undefined {
+  return tap.hits.find((hit) => hit.kind === 'plane') ?? tap.hits[0];
 }
 
 /** A floor plane further than this from the room's floor height means the frame moved. */
@@ -95,9 +110,8 @@ export function placeCorner(
   tap: ArTap,
   floorY: number | null,
 ): CornerPlacement {
-  // The hit that fixes the line of sight: a plane hit lies exactly on it, a point hit
-  // only near it.
-  const sightHit = tap.hits.find((hit) => hit.kind === 'plane') ?? tap.hits[0];
+  // The hit that fixes the line of sight.
+  const sightHit = preferredHit(tap);
   if (sightHit === undefined) return { ok: false, reason: 'no-hit' };
   const floorHit = tap.hits.find(
     (hit) => hit.facesUp && hit.position[1] < tap.camera[1],

@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
-import { placeCorner, type ArTap, type Vec3 } from '@/lib/ar-engine';
+import {
+  placeCorner,
+  preferredHit,
+  type ArTap,
+  type Vec3,
+} from '@/lib/ar-engine';
 
 // Real taps on the S22 Ultra (ticket 19, 2026-10-15): a 3 ft (0.9144 m) tape on the
 // floor, each end tapped through the app with depth on, 1.3–2.0 m from the camera.
@@ -171,5 +176,19 @@ describe('placeCorner', () => {
       corner: [-0.658, -1.622, 1.268],
       floorY: -1.622,
     });
+  });
+});
+
+describe('preferredHit', () => {
+  it('takes a detected plane over a nearer point, else the nearest hit', () => {
+    const wall = {
+      kind: 'plane' as const,
+      position: [0, 0, -2] as Vec3,
+      facesUp: false,
+    };
+    const near = point([0, 0, -1]);
+    expect(preferredHit({ camera: [0, 0, 0], hits: [near, wall] })).toBe(wall);
+    expect(preferredHit({ camera: [0, 0, 0], hits: [near] })).toBe(near);
+    expect(preferredHit({ camera: [0, 0, 0], hits: [] })).toBeUndefined();
   });
 });

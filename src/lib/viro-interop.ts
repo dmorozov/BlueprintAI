@@ -1,6 +1,8 @@
 import type { ViroARHitTestResult } from '@reactvision/react-viro';
 import type { StyleProp, ViewStyle } from 'react-native';
 
+import type { ArHit, Vec3 } from '@/lib/ar-engine';
+
 /**
  * ViroReact on Android ships legacy (pre-Fabric) view managers. Under RN 0.86's
  * new architecture they are rendered through the legacy-view-manager interop
@@ -70,40 +72,38 @@ export function viroHitTestPoint(
 }
 
 /**
- * Hit types in the order AR tap-to-trace prefers them. On Android, Viro labels an
- * ARCore plane hit inside the detected plane `ExistingPlaneUsingExtent`, a hit on
- * the plane's unbounded extension `EstimatedHorizontalPlane` (walls included,
- * despite the name) and anything else `FeaturePoint` (virocore v2.58.1,
- * `VROARFrameARCore::hitTest`). ARCore's depth hits (with the navigator's
- * `depthEnabled`) also arrive as `FeaturePoint`: Viro's `acquireTrackable` returns
- * no trackable for anything but a plane, so its `DepthPoint` branch never runs
- * (through 3.0.3). `ExistingPlane` is iOS-only: ARKit's plane without its extent
- * (not device-verified).
- *
- * A detected plane averages many points, so it beats a single depth sample; a depth
- * sample lies on a real surface, so it beats a sparse feature point. An unbounded
- * plane comes last because it continues behind walls and furniture: a tap low on a
- * wall can hit the floor's extension behind it.
+ * A plane hit whose pose is tilted less than this (pitch and roll, degrees) is
+ * horizontal: ARCore gives a horizontal plane's pose a yaw only and a wall's a 90°
+ * tilt. Not yet checked against rotations recorded on the phone.
  */
-const HIT_TYPE_PREFERENCE: readonly ViroARHitTestResult['type'][] = [
-  'ExistingPlaneUsingExtent',
-  'DepthPoint',
-  'FeaturePoint',
-  'ExistingPlane',
-  'EstimatedHorizontalPlane',
-];
+const HORIZONTAL_TILT_DEG = 15;
 
 /**
- * Picks the hit a tap should use from `performARHitTestWithPoint`'s results:
- * the most preferred type (see {@link HIT_TYPE_PREFERENCE}), and within a type the
- * engine's order, which for ARCore is nearest first.
+ * Maps one of Viro's hit-test results to the AR engine seam's hit, or null for a hit
+ * the app must not use.
+ *
+ * On Android, Viro labels an ARCore plane hit inside the detected plane
+ * `ExistingPlaneUsingExtent`, a hit on the plane's unbounded extension
+ * `EstimatedHorizontalPlane` (walls included, despite the name) and anything else
+ * `FeaturePoint` (virocore v2.58.1, `VROARFrameARCore::hitTest`). ARCore's depth hits
+ * also arrive as `FeaturePoint`: Viro's `acquireTrackable` returns no trackable for
+ * anything but a plane, so its `DepthPoint` branch never runs (through 3.0.3).
+ * `ExistingPlane` is iOS-only: ARKit's plane without its extent (not device-verified).
+ * Unbounded planes are dropped because they continue behind walls and furniture: a
+ * tap low on a wall can hit the floor's extension behind it.
  */
-export function pickViroHit(
-  results: readonly ViroARHitTestResult[],
-): ViroARHitTestResult | undefined {
-  for (const type of HIT_TYPE_PREFERENCE) {
-    const hit = results.find((result) => result.type === type);
-    if (hit !== undefined) return hit;
+export function toArHit(result: ViroARHitTestResult): ArHit | null {
+  const position = result.transform.position as Vec3;
+  if (result.type === 'FeaturePoint' || result.type === 'DepthPoint') {
+    return { kind: 'point', position, facesUp: false };
   }
-  return results[0];
+  if (result.type !== 'ExistingPlaneUsingExtent') return null;
+  const [pitch, , roll] = result.transform.rotation;
+  return {
+    kind: 'plane',
+    position,
+    facesUp:
+      Math.abs(pitch) < HORIZONTAL_TILT_DEG &&
+      Math.abs(roll) < HORIZONTAL_TILT_DEG,
+  };
 }
