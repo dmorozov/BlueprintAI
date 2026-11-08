@@ -18,6 +18,11 @@ import {
   TRY3_START,
   planDistance,
 } from './ticket-19-taps';
+import {
+  SHIFTED_FLOOR,
+  SHIFT_CORNER_2,
+  SHIFT_LOCK,
+} from './step-5-floor-shift-taps';
 
 /** Builds a session tracing a 3 x 4 m rectangle (floor plane, walking order). */
 function makeRectSession(qualities?: ('normal' | 'limited')[]) {
@@ -126,18 +131,42 @@ describe('ArCaptureSession corner taps and the room’s floor height', () => {
   });
 
   it('refuses a corner on a floor that moved and keeps the trace as it was', () => {
-    // Ticket 19, session 1: the room's first tap locked the floor at −1.653; 2 s later,
-    // after ARCore rebuilt its map, the floor plane under a tap was 27 cm higher.
+    // Step 5, event 2: the room locked its floor at −1.104; 28 s later ARCore's map
+    // had moved and the floor under a tap was 17 cm lower.
     const session = new ArCaptureSession();
-    expect(session.tapCorner(FLOOR_BEFORE_GHOST, 'normal')).toEqual({
-      ok: true,
-      clearedOpenings: 0,
-    });
-    expect(session.tapCorner(GHOST_FLOOR, 'normal')).toEqual({
+    session.tapCorner(SHIFT_LOCK, 'normal');
+    session.tapCorner(SHIFT_CORNER_2, 'normal');
+    const traced = session.cornerWorldPositions;
+    expect(session.tapCorner(SHIFTED_FLOOR, 'normal')).toEqual({
       ok: false,
       reason: 'floor-shifted',
     });
-    expect(session.cornerWorldPositions).toEqual([[0.588, -1.653, 0.947]]);
+    expect(session.cornerWorldPositions).toEqual(traced);
+  });
+
+  it('takes no new corner once the floor has moved, even after Clear', () => {
+    // New corners would not line up with the traced ones; only a new session (Restart
+    // room) starts over. A tap the room took before is refused now.
+    const session = new ArCaptureSession();
+    session.tapCorner(SHIFT_LOCK, 'normal');
+    session.tapCorner(SHIFTED_FLOOR, 'normal');
+    const refused = { ok: false, reason: 'floor-shifted' };
+    expect(session.tapCorner(SHIFT_CORNER_2, 'normal')).toEqual(refused);
+    session.clear();
+    expect(session.tapCorner(SHIFT_CORNER_2, 'normal')).toEqual(refused);
+    expect(session.cornerCount).toBe(0);
+  });
+
+  it('takes a corner behind a stale floor plane on the room’s floor', () => {
+    // Ticket 19, session 1: the room's first tap locked the floor at −1.653; 2 s later
+    // a stale plane 27 cm higher lay in front of the floor plane at that height.
+    const session = new ArCaptureSession();
+    session.tapCorner(FLOOR_BEFORE_GHOST, 'normal');
+    expect(session.tapCorner(GHOST_FLOOR, 'normal')).toEqual({
+      ok: true,
+      clearedOpenings: 0,
+    });
+    expect(session.cornerWorldPositions[1]![1]).toBe(-1.653);
   });
 
   it('places nothing for a tap that hit nothing', () => {

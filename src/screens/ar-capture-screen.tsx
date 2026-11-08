@@ -90,14 +90,14 @@ const TRACE_PROMPTS: Record<
     message: 'Earlier corners may be off. Keep them, or restart this room?',
     keepLabel: 'Keep corners',
   },
-  // ARCore rebuilt its map: the floor under the tap is not the room's floor any more.
-  // Clear keeps the room's floor height, so only a fresh engine session gives the
-  // room a new one.
+  // ARCore's map moved under the room, so the room takes no new corner (see
+  // ArCaptureSession) and only a fresh engine session traces it again. Keeping lets
+  // it be finished with the corners it has; each later corner tap asks again.
   'floor-moved': {
     title: 'The floor moved',
     message:
-      'Tracking was interrupted and the floor is no longer at this room’s floor height, so the corner was not placed. Restart the room to trace it again.',
-    keepLabel: 'Keep tracing',
+      'AR tracking shifted under this room, so the corner was not placed: new corners would not line up with the ones already traced. Restart the room, or keep its corners to finish it as it is.',
+    keepLabel: 'Keep corners',
   },
 };
 

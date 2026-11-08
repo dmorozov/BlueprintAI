@@ -75,12 +75,15 @@ export type CornerTapResult =
  *
  * The session also holds the room's floor height, locked by its first corner tap on
  * the floor. Clear and Undo keep it; the next room, and a room traced again in a new
- * tracking frame, start a new session.
+ * tracking frame, start a new session. Once a tap finds that the floor moved, the room
+ * takes no new corner: ARCore's map moved under it, so a new corner would not line up
+ * with the ones traced. Its corners stay, to finish the room with or undo.
  */
 export class ArCaptureSession {
   private corners: ArCornerTap[] = [];
   private openingTaps: StoredOpening[] = [];
   private floorY: number | null = null;
+  private floorMoved = false;
 
   get cornerCount(): number {
     return this.corners.length;
@@ -119,11 +122,15 @@ export class ArCaptureSession {
 
   /**
    * Places a Corner for a tap at the room's floor height and records it; a refused tap
-   * records nothing.
+   * records nothing. After a `floor-shifted` refusal, every tap is refused that way.
    */
   tapCorner(tap: ArTap, quality: ArTrackingQuality): CornerTapResult {
+    if (this.floorMoved) return { ok: false, reason: 'floor-shifted' };
     const placement = placeCorner(tap, this.floorY);
-    if (!placement.ok) return placement;
+    if (!placement.ok) {
+      if (placement.reason === 'floor-shifted') this.floorMoved = true;
+      return placement;
+    }
     this.floorY = placement.floorY;
     return {
       ok: true,

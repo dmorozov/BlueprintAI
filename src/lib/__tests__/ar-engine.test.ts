@@ -25,6 +25,12 @@ import {
   plane,
   point,
 } from './ticket-19-taps';
+import {
+  SHIFTED_FLOOR,
+  SHIFT_LOCK_FLOOR_Y,
+  STACKED_FLOORS,
+  STACKED_LOCK_FLOOR_Y,
+} from './step-5-floor-shift-taps';
 
 function cornerOf(tap: ArTap, floorY: number | null): Vec3 {
   const placement = placeCorner(tap, floorY);
@@ -104,11 +110,25 @@ describe('placeCorner', () => {
     expect(placeCorner(level, -1.5)).toEqual({ ok: false, reason: 'no-hit' });
   });
 
-  it('refuses a corner when the floor under it has moved more than 10 cm', () => {
-    expect(placeCorner(GHOST_FLOOR, -1.653)).toEqual({
+  it('refuses a corner when no floor plane on its line of sight is within 10 cm of the room’s floor', () => {
+    // Step 5: ARCore's map moved 17 cm (event 2) and 20 cm (event 1) under the room.
+    expect(placeCorner(SHIFTED_FLOOR, SHIFT_LOCK_FLOOR_Y)).toEqual({
       ok: false,
       reason: 'floor-shifted',
     });
+    expect(placeCorner(STACKED_FLOORS, STACKED_LOCK_FLOOR_Y)).toEqual({
+      ok: false,
+      reason: 'floor-shifted',
+    });
+  });
+
+  it('places a corner on the room’s floor behind a stale floor plane', () => {
+    // Ticket 19: a stale plane 27 cm up, then the floor plane at the room's height.
+    const placement = placeCorner(GHOST_FLOOR, -1.653);
+    if (!placement.ok) throw new Error(placement.reason);
+    expect(placement.floorY).toBe(-1.653);
+    const floorPlaneHit: Vec3 = [-0.436, -1.653, 1.71];
+    expect(planDistance(placement.corner, floorPlaneHit)).toBeLessThan(0.01);
   });
 
   it('locks the room’s floor height at its first floor-plane tap, which is the corner', () => {

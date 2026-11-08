@@ -2,7 +2,7 @@
 
 Type: task
 Mode: HITL (agent drafts, user posts under their GitHub account)
-Status: claimed
+Status: resolved (not posted, 2026-11-07)
 Blocked by: 01, 02
 Part of: ../map.md
 
@@ -37,3 +37,4 @@ Resolution records the links to the posted comments and any maintainer response 
   - **Patch (a) rebased:** `logs/ticket-08/patches/viro-patch-a-v3.0.3.diff` (the bridge half applied unchanged) and `virocore-patch-a-v3.0.3.diff` (one hunk's context: 3.0.3 added `#include "VROReactVisionAuth.h"` beside the patch's new include). Both apply cleanly to `v3.0.3`; not built on 3.0.3.
   - **Draft changes:** 1 (#499): versions, the 3.0.3 re-run, "unchanged in v3.0.3", the rebased patch. 2 (DepthPoint): 3.0.3 setup and evidence. 3 (#568): 3.0.3 results and an answer to the reporter's "Does 3.0.3 change anything in the ARCore session set-up?". 1b unchanged.
   - **Next:** the user posts 1, then 1b with the link to 1, then 2 and 3, and sends the links back.
+- **2026-11-07, resolved without posting:** the user keeps this work local and makes no GitHub posts, so nothing was sent upstream. The drafts in `../upstream/` (refreshed for 3.0.3) and the patches in `logs/ticket-08/patches/` (with the `-v3.0.3` copies) stay for reference. Consequences: no maintainer fix for the dropped `ArStatus` or the depth-hit label is expected from this work; the app keeps reading its own log for failure reasons, and a virocore fork stays the fallback (spec, Solution).

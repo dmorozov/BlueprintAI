@@ -78,7 +78,7 @@ What the user sees:
   - 3.0.x keeps RN 0.86 / Expo 57 peers, the same ARCore build (Java 1.43 / native 1.51), the same depth support, and the four log strings the app parses.
   - The upgrade needs a native rebuild.
 - **No virocore fork.** It stays the documented fallback: about 3–4.5 days, then 0.5–1 day per upstream release (ticket 08). It becomes worth it only if:
-  - the spec later needs ARCore's exact create/resume/update statuses and upstream declines the status-to-JS change (ticket 08 patch (a)), or
+  - the spec later needs ARCore's exact create/resume/update statuses (the status-to-JS change, ticket 08 patch (a), was not offered upstream: ticket 06 closed without posting), or
   - code comes to depend on telling depth hits from feature points.
 - **No owned ARCore module** (tickets 09, 10, 13). Two ARCore engines cannot ship in one APK, so the engines cannot be A/B tested side by side.
 - **Not applied:**
@@ -178,7 +178,9 @@ interface ArEngineViewProps {
 
 - **Every engine session is a new Tracking frame:** first mount, Restart AR, and photo step → Next room. The screen saves each room under the frame id from `onFrameStart`.
   - **This fixes a bug.** Restart AR kept the old `arSessionId`, so `mergeSameFramePlans` merged rooms from different frames as if aligned.
-- **Floor-shift refusal:** a corner tap whose floor plane is more than **10 cm** from the locked height is refused: "The floor moved; tracking was interrupted." This is the signature of ARCore rebuilding its map (ticket 19: old planes stayed at six stale heights in one session).
+- **Floor-shift refusal:** a corner tap whose floor planes along the line of sight all lie more than **10 cm** from the locked height is refused: "The floor moved". ARCore's map moved under the room: 17–20 cm in step 5, where the floor planes and the feature/depth points under the refused taps agreed with each other, not with the room (analysed 2026-11-07).
+  - **The room then takes no new corner,** since none would line up with the corners traced. The question offers Restart room, or keeping the corners to finish the room as it is; each later corner tap asks again.
+  - **A stale plane in front of a floor plane at the locked height does not count** (ticket 19: old planes stayed at six stale heights in one session, and one lay 27 cm above the floor along a tap's line of sight).
 - **Long-loss warning:** when tracking returns after a loss of **≥ 3 s**, with corners already traced, the app asks: "Tracking was interrupted; earlier corners may be off. Keep, or restart this room?"
 - **Both questions are asked in the bottom bar,** not in a dialog. A dialog opens over the AR view, where a tap meant for the room answered it as it opened (device runs, steps 4–6). Until it is answered, the room takes no taps ("Answer the question below first.") and the bar's other controls wait. Restart AR clears it.
 - **Background → foreground** keeps the engine session and its frame (Viro pauses and resumes ARCore; ticket 04). Only a long loss triggers the warning.
@@ -195,7 +197,8 @@ The engine stays Viro, so reference photos stay on expo-camera. The photo step u
     - the three tape tries land within 3%;
     - the first floor-plane hit locks the height;
     - before the lock the preferred hit is used;
-    - a floor plane > 10 cm from the lock is refused;
+    - a tap whose floor planes all lie > 10 cm from the lock is refused (step 5's real shifts), and the room takes no corner after it, even after Clear;
+    - a stale plane in front of a floor plane at the lock is not refused (ticket 19);
     - no hits gives `no-hit`;
     - an upward line of sight gives `no-hit`.
   - **`openingHit`:** step 6's wall taps (`logs/step-6/`): the wall's depth points over the floor plane behind it; a detected wall plane, even behind a nearer point; no wall when only the floor or nothing is hit.
@@ -274,7 +277,7 @@ Phone: Samsung Galaxy S22 Ultra `SM-S908U`, Android 16, security patch 2026-08-0
   - **Release builds:** reading the app's own log works there (plan row 9, step 6, 2026-11-07, on a non-debuggable build with Viro 3.0.3). If a phone or Android version blocked it, a dead session would say "The AR engine did not start. Tap Restart AR to try again." (the app cannot tell an empty log from an engine that never attached), which is about as useful as the generic reason; the specific reasons (camera holder, dark camera, ARCore failures) would be lost.
   - **Other Samsung Android 16 phones:**
     - **viro#568 (Galaxy A56)** reports tracking that flaps about 10 times a second inside Viro while plain ARCore apps work on the same phone. So it is a Viro-specific failure that could hit other users' phones.
-    - **A candidate cause:** Viro always overrides ARCore's default camera config with the largest CPU image (1920×1080 on the S22U), in the `SessionNative` constructor. The ticket 06 reply asks the reporter to check; if it is confirmed, the fix is upstream or a one-change fork.
+    - **A candidate cause:** Viro always overrides ARCore's default camera config with the largest CPU image (1920×1080 on the S22U), in the `SessionNative` constructor. This was not reported upstream (ticket 06 closed without posting); if a user's phone shows it, the fix is a one-change fork.
     - **ARCore's own #1784/#1785** report a camera-to-motion-sensor clock-offset issue. The S22U logged that warning once (−5.9 ms) without effect.
     - There is no second test device.
   - **ARCore updates arrive silently** (1.56 → 1.57 during this work). Re-run plan rows 1, 5 and 6 when the version changes.
@@ -293,11 +296,11 @@ Phone: Samsung Galaxy S22 Ultra `SM-S908U`, Android 16, security patch 2026-08-0
 
 ## Further Notes
 
-- **Upstream (ticket 06, open, HITL: the agent drafts, the user posts):**
+- **Upstream (ticket 06): drafted, then closed without posting on 2026-11-07;** the user keeps the work local. The drafts stay in `.scratch/measure-with-ar-reliability/upstream/` for reference:
   - viro#499 with the S22U results (the Dead session was app-side), plus an offer of the status-to-JS change (ticket 08 patch (a)).
   - The depth-label bug with its one-line fix.
-  - A reply on viro#568 asking for a `hello_ar` run.
-  - The ARCore #1762/#1784 posts were dropped (they don't apply to this phone).
+  - A reply on viro#568 with the S22U data and the camera-config question.
+  - The ARCore #1762/#1784 posts were dropped earlier (they don't apply to this phone).
 - **Still open (Not yet specified on the map):**
   - error UX beyond ticket 04's messages (retry policy, prompting the install);
   - EAS Build / CI for the local native module, only if EAS is adopted.

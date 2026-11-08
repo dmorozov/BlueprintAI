@@ -14,7 +14,7 @@ All six spec steps are done. Steps 1–5 and the resume fix are committed (steps
 | 5. Viro 3.0.3 | **Done, committed** (`fd9e347`); plan rows 1–6 passed on the S22U 2026-11-07 (row 6 at 4 ft; see below) |
 | 6. Release-build check | **Done** 2026-11-07: the app reads its own log in a release build, so no code change. Results and the spec's risk line are uncommitted |
 
-Also open: **ticket 06**. The four upstream drafts in `upstream/` are waiting to be posted. Send the comment and issue links back so they can be recorded on the ticket and it can be closed.
+**Ticket 06** is closed without posting (2026-11-07): the user keeps the work local. The drafts in `upstream/` stay for reference.
 
 ## Step 2 (committed in `6cddb3f`)
 
@@ -271,11 +271,32 @@ S22U `R5CTA2PB2ZX`, Play Services for AR 1.57.262640293 (unchanged since step 5)
   - "The floor moved" was not seen: after the 30 s loss ARCore kept its map, and three floor taps placed corners normally. It shares the bar with the question above; only its text differs.
   - The phone state matches before and after; Metro and `adb reverse` are stopped.
 
+## Analysis: what "The floor moved" means (2026-11-07, from logs only)
+
+Question: after "The floor moved" → Keep tracing, a tap that hits only points is placed at the room's locked floor height. That is right if the refusal came from a leftover (stale) floor plane, and wrong if ARCore's map really moved. Script: `logs/floor-shift/timeline.js` (status changes, each tap's raw hits with heights, the corner rule's outcome). Feature and depth points describe the current map, so where they sit decides it.
+
+- **Step 4 (`logs/step-4/session.logcat.txt`, 1 refusal): inconclusive.** A 6.3 s loss came before any corner; the lock (−1.115 m) was set after it. 3 s after corner 2 a tap hit an upward plane 10.1 cm lower (−1.216), with its point between the two (−1.169). The room was restarted at once, so no tap followed.
+- **Step 5, event 2 (`logs/step-5/session.logcat.txt`, 1794112474, 2 refusals): the map moved.** Lock −1.104 (plane and points within 1–3 cm). 28 s later, **with no tracking loss in between**, plane and points both said −1.275 / −1.285 and −1.275 / −1.270. After Restart room the new session's floor was −1.216 (its own origin). The loss that preceded it (34.8 s) came before any corner, so no "Tracking was interrupted" question could fire.
+- **Step 5, event 1 (1794111686, 3 refusals): the map moved, and stale planes stayed.** Lock −0.917 (plane and points agree). 5 s later the next spots' points were at −1.02 to −1.10 and by the refusals at about −1.12, while upward planes stayed stacked along the same line of sight (−0.99, −1.02, −1.14, −2.40). Corner 2 (98.0 s) passed the 10 cm check on a −0.993 plane and was placed at the old height.
+- **Conclusion:** in both conclusive events the floor really moved in ARCore's map (17–20 cm). After Keep tracing, point-only taps land at the old height, about 17 cm above the real floor: roughly 20 cm short at 1.5 m. New corners either get refused or misplaced; only the corners already traced still line up with each other.
+- **Also seen:** a big shift can come tens of seconds after a long loss, while tracking reports normal throughout.
+
+## Fix: after the floor moved (uncommitted, 2026-11-07)
+
+From the analysis above; the user chose "Restart room, or keep the corners to finish" and the refined check.
+- **`placeCorner` (`src/lib/ar-engine.ts`):** after the lock, a tap is refused only when it has floor planes on its line of sight and **none** lies within 10 cm of the room's height. Before: the first floor plane decided. Ticket 19's `GHOST_FLOOR` (a stale plane 27 cm above a floor plane at the room's height) is now placed on the floor; step 5's real shifts (`SHIFTED_FLOOR`, `STACKED_FLOORS`) are still refused.
+- **`ArCaptureSession.tapCorner` (`src/lib/ar-capture.ts`):** after a `floor-shifted` refusal, every corner tap is refused the same way, also after Clear; a new session (Restart room, Restart AR, Next room) starts over. Undo and Finish room still work on the corners traced.
+- **Screen:** "The floor moved" now reads "AR tracking shifted under this room, so the corner was not placed: new corners would not line up with the ones already traced. Restart the room, or keep its corners to finish it as it is." Buttons: "Keep corners" and "Restart room". Each later corner tap reopens the question, so Restart room stays reachable (the Restart AR chip only shows when tracking is not good).
+- **Tests (TDD, red then green):** fixtures `src/lib/__tests__/step-5-floor-shift-taps.ts` from step 5's log; `placeCorner`: both real shifts refused, the ghost floor placed within 1 cm of the floor-plane hit; `ArCaptureSession`: the refusal keeps the trace, the room takes no corner after it (even after Clear), and the ghost-floor tap is taken. 123 tests, typecheck, lint and prettier pass.
+- **Not device-checked:** a floor shift cannot be caused on demand. The question uses the bar verified in "Fix: questions in the bottom bar"; only its text changed.
+- **Not changed:** Openings mode still takes taps after a floor shift; an opening placed then may sit off along its wall.
+
 ## After that
 
 - All six spec steps are done. Open items:
-  - **Ticket 06:** the four upstream drafts in `upstream/` are refreshed for 3.0.3 (2026-11-07; see the ticket). The user posts them and sends the links back so they can be recorded.
-  - **Decisions for the user:** the long loss between rooms (left for later); after "The floor moved" → Keep tracing, point-only taps still use the old floor height.
+  - **Ticket 06:** closed without posting (2026-11-07). The drafts were refreshed for 3.0.3 first and stay in `upstream/` for reference.
+  - **Decisions for the user:** the long loss between rooms (left for later).
+  - Done since: "The floor moved" now closes the room to new corners (see "Fix: after the floor moved").
   - Done since: the questions moved to the bottom bar (see "Fix: questions in the bottom bar").
   - **Row 6 method:** repeat with a tape of 2–3 m when one is available.
 

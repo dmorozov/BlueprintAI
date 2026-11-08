@@ -97,7 +97,7 @@ export function openingHit(tap: ArTap): ArHit | undefined {
   );
 }
 
-/** A floor plane further than this from the room's floor height means the frame moved. */
+/** No floor plane within this of the room's floor height means the frame moved. */
 const FLOOR_SHIFT_LIMIT_M = 0.1;
 /** A line of sight that drops less than this toward its hit never reaches the floor. */
 const MIN_DROP_M = 1e-3;
@@ -120,8 +120,10 @@ export type CornerPlacement =
  *   locks it and is the Corner; without one, the Corner is the preferred hit.
  * - Once locked, the Corner is where the tap's line of sight meets the floor height,
  *   so a tap that first hits a tape case or a foot still lands on the floor.
- * - A floor plane more than FLOOR_SHIFT_LIMIT_M from the locked height means ARCore
- *   rebuilt its map and the tracking frame moved, so the tap is refused.
+ * - Floor planes on the line of sight, none of them within FLOOR_SHIFT_LIMIT_M of the
+ *   locked height, mean ARCore's map moved under the room (17–20 cm in step 5, where
+ *   the points agreed with the new planes), so the tap is refused. A stale plane in
+ *   front of a floor plane at the locked height does not count (ticket 19).
  */
 export function placeCorner(
   tap: ArTap,
@@ -130,17 +132,20 @@ export function placeCorner(
   // The hit that fixes the line of sight.
   const sightHit = preferredHit(tap);
   if (sightHit === undefined) return { ok: false, reason: 'no-hit' };
-  const floorHit = tap.hits.find(
+  const floorHits = tap.hits.filter(
     (hit) => hit.facesUp && hit.position[1] < tap.camera[1],
   );
   if (floorY === null) {
+    const floorHit = floorHits[0];
     return floorHit === undefined
       ? { ok: true, corner: sightHit.position, floorY: null }
       : { ok: true, corner: floorHit.position, floorY: floorHit.position[1] };
   }
   if (
-    floorHit !== undefined &&
-    Math.abs(floorHit.position[1] - floorY) > FLOOR_SHIFT_LIMIT_M
+    floorHits.length > 0 &&
+    floorHits.every(
+      (hit) => Math.abs(hit.position[1] - floorY) > FLOOR_SHIFT_LIMIT_M,
+    )
   ) {
     return { ok: false, reason: 'floor-shifted' };
   }
