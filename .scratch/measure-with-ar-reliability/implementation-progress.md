@@ -254,11 +254,29 @@ S22U `R5CTA2PB2ZX`, Play Services for AR 1.57.262640293 (unchanged since step 5)
   - Two taps at the foot of the wall hit the floor plane and wall points at the same spot (4 cm apart); the fix took the point, which changes nothing there.
   - The phone state matches before and after; Metro and `adb reverse` are stopped.
 
+## Fix: questions in the bottom bar (uncommitted, 2026-11-07)
+
+- **Problem:** "Tracking was interrupted" and "The floor moved" were `Alert` dialogs. They open over the AR view, where a tap meant for the room answered them as they opened: step 4 (the user's tap hit Keep), step 5 (both floor-moved dialogs closed within about 1 s; which button is not recorded) and step 6 (a scripted Clear tap hit Restart room).
+- **Change (`src/screens/ar-capture-screen.tsx` only):**
+  - A `tracePrompt` state ('tracking-interrupted' | 'floor-moved') replaces both dialogs. Same titles and messages; the buttons are "Keep corners" / "Keep tracing" and "Restart room".
+  - The question takes the hint line's place in the bottom bar, below the AR view, with `accessibilityLiveRegion="polite"` so TalkBack announces it like the dialog.
+  - While it is open, an AR tap places nothing and shows "Answer the question below first."; the mode chips, Undo, Clear, the Restart AR chip and Finish room are disabled.
+  - `restartAr` (Restart room, Restart AR, the photo step → Next room) clears it.
+  - The two remaining `Alert`s (confirm Restart AR, replace an existing plan) open only from the user's own button press, so they stay.
+- **No unit test:** the screen is covered by the device plan (spec, Testing Decisions); the change has no pure logic.
+- **Device check (2026-11-07, dev client, Metro; `logs/trace-prompt/`, temporary `[ar-trace]` with the prompt and corner count, since removed):**
+  - 2 corners, phone face down: a 2.8 s loss opened nothing (under 3 s, correct); about 10 s and 30 s losses opened "Tracking was interrupted" in the bar when tracking returned. The AR view stayed clear; the chips and Finish were dimmed (`prompt-1.png`).
+  - An AR tap with the question open: the toast, and the room kept its 2 corners.
+  - "Keep corners": the question closed, 2 corners, same frame, the hint back. "Restart room": a new frame, 0 corners, "Tracking good" 3.0 s later.
+  - "The floor moved" was not seen: after the 30 s loss ARCore kept its map, and three floor taps placed corners normally. It shares the bar with the question above; only its text differs.
+  - The phone state matches before and after; Metro and `adb reverse` are stopped.
+
 ## After that
 
 - All six spec steps are done. Open items:
   - **Ticket 06:** post the four upstream drafts in `upstream/` and send the links back so they can be recorded.
-  - **Decisions for the user:** move the long-loss and floor-moved prompts to the bottom bar (accidental answers, seen three times); the long loss between rooms (left for later); after "The floor moved" → Keep tracing, point-only taps still use the old floor height.
+  - **Decisions for the user:** the long loss between rooms (left for later); after "The floor moved" → Keep tracing, point-only taps still use the old floor height.
+  - Done since: the questions moved to the bottom bar (see "Fix: questions in the bottom bar").
   - **Row 6 method:** repeat with a tape of 2–3 m when one is available.
 
 ## Practical notes

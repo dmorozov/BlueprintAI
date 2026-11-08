@@ -180,6 +180,7 @@ interface ArEngineViewProps {
   - **This fixes a bug.** Restart AR kept the old `arSessionId`, so `mergeSameFramePlans` merged rooms from different frames as if aligned.
 - **Floor-shift refusal:** a corner tap whose floor plane is more than **10 cm** from the locked height is refused: "The floor moved; tracking was interrupted." This is the signature of ARCore rebuilding its map (ticket 19: old planes stayed at six stale heights in one session).
 - **Long-loss warning:** when tracking returns after a loss of **≥ 3 s**, with corners already traced, the app asks: "Tracking was interrupted; earlier corners may be off. Keep, or restart this room?"
+- **Both questions are asked in the bottom bar,** not in a dialog. A dialog opens over the AR view, where a tap meant for the room answered it as it opened (device runs, steps 4–6). Until it is answered, the room takes no taps ("Answer the question below first.") and the bar's other controls wait. Restart AR clears it.
 - **Background → foreground** keeps the engine session and its frame (Viro pauses and resumes ARCore; ticket 04). Only a long loss triggers the warning.
 
 ### Reference photos (ticket 16, out of scope)

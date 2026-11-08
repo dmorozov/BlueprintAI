@@ -72,6 +72,35 @@ type Phase =
   | 'finished';
 type TapMode = 'corner' | 'opening';
 
+/**
+ * A question about the room's corners, asked in the bottom bar rather than in a
+ * dialog: a dialog opens over the AR view, where a tap meant for the room can answer
+ * it the moment it opens (seen in device runs on the S22 Ultra, steps 4–6). The room
+ * takes no taps until it is answered.
+ */
+type TracePrompt = 'tracking-interrupted' | 'floor-moved';
+
+const TRACE_PROMPTS: Record<
+  TracePrompt,
+  { title: string; message: string; keepLabel: string }
+> = {
+  // A long loss may have moved the tracking frame under the corners traced before it.
+  'tracking-interrupted': {
+    title: 'Tracking was interrupted',
+    message: 'Earlier corners may be off. Keep them, or restart this room?',
+    keepLabel: 'Keep corners',
+  },
+  // ARCore rebuilt its map: the floor under the tap is not the room's floor any more.
+  // Clear keeps the room's floor height, so only a fresh engine session gives the
+  // room a new one.
+  'floor-moved': {
+    title: 'The floor moved',
+    message:
+      'Tracking was interrupted and the floor is no longer at this room’s floor height, so the corner was not placed. Restart the room to trace it again.',
+    keepLabel: 'Keep tracing',
+  },
+};
+
 interface PendingOpening {
   world: [number, number, number];
   wallIndex: number;
@@ -117,6 +146,7 @@ export function ArCaptureScreen() {
   const [engineStatus, setEngineStatus] =
     useState<ArEngineStatus>(ENGINE_STARTING);
   const [mode, setMode] = useState<TapMode>('corner');
+  const [tracePrompt, setTracePrompt] = useState<TracePrompt | null>(null);
   const [pendingOpening, setPendingOpening] = useState<PendingOpening | null>(
     null,
   );
@@ -246,6 +276,8 @@ export function ArCaptureScreen() {
     sessionRef.current = new ArCaptureSession();
     setPendingOpening(null);
     setMode('corner');
+    // A new frame and an empty trace: no question about the old corners is left.
+    setTracePrompt(null);
     // The remounted engine reports its own status and its new tracking frame; until
     // then a stale "Tracking good" must not hide a session that never starts.
     setEngineStatus(ENGINE_STARTING);
@@ -258,6 +290,10 @@ export function ArCaptureScreen() {
       nativeEvent: { locationX: number; locationY: number };
     }) => {
       if (phase !== 'ready') return;
+      if (tracePrompt !== null) {
+        showToast('Answer the question below first.');
+        return;
+      }
       const quality = qualityNow();
       if (quality === null) {
         // A dead session will not recover from motion — point at the restart.
@@ -292,21 +328,7 @@ export function ArCaptureScreen() {
             showToast(NO_SURFACE_MESSAGE);
             return;
           }
-          // ARCore rebuilt its map: the floor under the tap is not the room's floor
-          // any more. Clear keeps the room's floor height, so only a fresh engine
-          // session gives the room a new one.
-          Alert.alert(
-            'The floor moved',
-            'Tracking was interrupted and the floor is no longer at this room’s floor height, so the corner was not placed. Restart the room to trace it again.',
-            [
-              { text: 'Keep tracing', style: 'cancel' },
-              {
-                text: 'Restart room',
-                style: 'destructive',
-                onPress: restartAr,
-              },
-            ],
-          );
+          setTracePrompt('floor-moved');
           return;
         }
         // First meaningful input — the room comes into existence with this tap.
@@ -344,9 +366,9 @@ export function ArCaptureScreen() {
       phase,
       mode,
       qualityNow,
-      restartAr,
       showToast,
       syncCorners,
+      tracePrompt,
     ],
   );
 
@@ -393,14 +415,7 @@ export function ArCaptureScreen() {
   // (a trip to the background counts). Only mid-trace: a finished room is saved.
   const warnAfterLongLoss = useEffectEvent(() => {
     if (phase !== 'ready' || cornerCount === 0) return;
-    Alert.alert(
-      'Tracking was interrupted',
-      'Earlier corners may be off. Keep them, or restart this room?',
-      [
-        { text: 'Keep', style: 'cancel' },
-        { text: 'Restart room', style: 'destructive', onPress: restartAr },
-      ],
-    );
+    setTracePrompt('tracking-interrupted');
   });
 
   useEffect(() => {
@@ -997,6 +1012,7 @@ export function ArCaptureScreen() {
             <Pressable
               accessibilityRole="button"
               onPress={() => setMode('corner')}
+              disabled={tracePrompt !== null}
               style={[
                 styles.chip,
                 { backgroundColor: theme.backgroundElement },
@@ -1004,6 +1020,7 @@ export function ArCaptureScreen() {
                   borderColor: theme.primary,
                   borderWidth: 2,
                 },
+                tracePrompt !== null && styles.disabled,
               ]}
             >
               <Text style={[styles.chipLabel, { color: theme.text }]}>
@@ -1013,6 +1030,7 @@ export function ArCaptureScreen() {
             <Pressable
               accessibilityRole="button"
               onPress={() => setMode('opening')}
+              disabled={tracePrompt !== null}
               style={[
                 styles.chip,
                 { backgroundColor: theme.backgroundElement },
@@ -1020,6 +1038,7 @@ export function ArCaptureScreen() {
                   borderColor: theme.primary,
                   borderWidth: 2,
                 },
+                tracePrompt !== null && styles.disabled,
               ]}
             >
               <Text style={[styles.chipLabel, { color: theme.text }]}>
@@ -1029,11 +1048,11 @@ export function ArCaptureScreen() {
             <Pressable
               accessibilityRole="button"
               onPress={handleUndo}
-              disabled={cornerCount === 0}
+              disabled={cornerCount === 0 || tracePrompt !== null}
               style={({ pressed }) => [
                 styles.chip,
                 { backgroundColor: theme.backgroundElement },
-                cornerCount === 0 && styles.disabled,
+                (cornerCount === 0 || tracePrompt !== null) && styles.disabled,
                 pressed && styles.pressed,
               ]}
             >
@@ -1044,11 +1063,11 @@ export function ArCaptureScreen() {
             <Pressable
               accessibilityRole="button"
               onPress={handleClear}
-              disabled={cornerCount === 0}
+              disabled={cornerCount === 0 || tracePrompt !== null}
               style={({ pressed }) => [
                 styles.chip,
                 { backgroundColor: theme.backgroundElement },
-                cornerCount === 0 && styles.disabled,
+                (cornerCount === 0 || tracePrompt !== null) && styles.disabled,
                 pressed && styles.pressed,
               ]}
             >
@@ -1062,9 +1081,11 @@ export function ArCaptureScreen() {
               <Pressable
                 accessibilityRole="button"
                 onPress={handleRestartAr}
+                disabled={tracePrompt !== null}
                 style={({ pressed }) => [
                   styles.chip,
                   { backgroundColor: theme.backgroundElement },
+                  tracePrompt !== null && styles.disabled,
                   pressed && styles.pressed,
                 ]}
               >
@@ -1074,23 +1095,75 @@ export function ArCaptureScreen() {
               </Pressable>
             )}
           </View>
-          <ThemedText variant="small" themeColor="textSecondary">
-            {!trackingNormal
-              ? engineStatus.kind === 'dead'
-                ? 'AR didn’t start — tap Restart AR.'
-                : 'Tracking not active — move the phone slowly, or tap Restart AR.'
-              : mode === 'corner'
-                ? `Tap each wall corner in order (${cornerCount} so far).`
-                : 'Tap the position of a door or window on a wall.'}
-          </ThemedText>
+          {tracePrompt !== null ? (
+            // In the bar, below the AR view, so a tap meant for the room cannot
+            // answer it; announced like the dialog it replaces.
+            <View
+              accessibilityLiveRegion="polite"
+              style={[
+                styles.tracePrompt,
+                { backgroundColor: theme.backgroundElement },
+              ]}
+            >
+              <ThemedText variant="smallBold">
+                {TRACE_PROMPTS[tracePrompt].title}
+              </ThemedText>
+              <ThemedText variant="small">
+                {TRACE_PROMPTS[tracePrompt].message}
+              </ThemedText>
+              <View style={styles.row}>
+                <Pressable
+                  accessibilityRole="button"
+                  onPress={() => setTracePrompt(null)}
+                  style={({ pressed }) => [
+                    styles.secondaryButton,
+                    { backgroundColor: theme.background },
+                    pressed && styles.pressed,
+                  ]}
+                >
+                  <Text style={[styles.buttonLabel, { color: theme.text }]}>
+                    {TRACE_PROMPTS[tracePrompt].keepLabel}
+                  </Text>
+                </Pressable>
+                <Pressable
+                  accessibilityRole="button"
+                  onPress={restartAr}
+                  style={({ pressed }) => [
+                    styles.secondaryButton,
+                    { backgroundColor: theme.background },
+                    pressed && styles.pressed,
+                  ]}
+                >
+                  <Text style={[styles.buttonLabel, { color: theme.text }]}>
+                    Restart room
+                  </Text>
+                </Pressable>
+              </View>
+            </View>
+          ) : (
+            <ThemedText variant="small" themeColor="textSecondary">
+              {!trackingNormal
+                ? engineStatus.kind === 'dead'
+                  ? 'AR didn’t start — tap Restart AR.'
+                  : 'Tracking not active — move the phone slowly, or tap Restart AR.'
+                : mode === 'corner'
+                  ? `Tap each wall corner in order (${cornerCount} so far).`
+                  : 'Tap the position of a door or window on a wall.'}
+            </ThemedText>
+          )}
           <Pressable
             accessibilityRole="button"
             onPress={handleFinish}
-            disabled={cornerCount < 3 || pendingOpening !== null}
+            disabled={
+              cornerCount < 3 || pendingOpening !== null || tracePrompt !== null
+            }
             style={({ pressed }) => [
               styles.primaryButton,
               { backgroundColor: theme.primary },
-              (cornerCount < 3 || pendingOpening !== null) && styles.disabled,
+              (cornerCount < 3 ||
+                pendingOpening !== null ||
+                tracePrompt !== null) &&
+                styles.disabled,
               pressed && styles.pressed,
             ]}
           >
@@ -1172,6 +1245,11 @@ const styles = StyleSheet.create({
     gap: Spacing.two,
     paddingHorizontal: Spacing.three,
     paddingTop: Spacing.three,
+  },
+  tracePrompt: {
+    borderRadius: 16,
+    padding: Spacing.three,
+    gap: Spacing.two,
   },
   nameInput: {
     fontSize: 16,
