@@ -179,7 +179,7 @@ interface ArEngineViewProps {
 - **Every engine session is a new Tracking frame:** first mount, Restart AR, and photo step → Next room. The screen saves each room under the frame id from `onFrameStart`.
   - **This fixes a bug.** Restart AR kept the old `arSessionId`, so `mergeSameFramePlans` merged rooms from different frames as if aligned.
 - **Floor-shift refusal:** a corner tap whose floor planes along the line of sight all lie more than **10 cm** from the locked height is refused: "The floor moved". ARCore's map moved under the room: 17–20 cm in step 5, where the floor planes and the feature/depth points under the refused taps agreed with each other, not with the room (analysed 2026-11-07).
-  - **The room then takes no new corner,** since none would line up with the corners traced. The question offers Restart room, or keeping the corners to finish the room as it is; each later corner tap asks again.
+  - **The room then takes no new corner or opening,** since neither would line up with the corners traced. The question offers Restart room, or keeping the corners to finish the room as it is; each later corner or opening tap asks again.
   - **A stale plane in front of a floor plane at the locked height does not count** (ticket 19: old planes stayed at six stale heights in one session, and one lay 27 cm above the floor along a tap's line of sight).
 - **Long-loss warning:** when tracking returns after a loss of **≥ 3 s**, with corners already traced, the app asks: "Tracking was interrupted; earlier corners may be off. Keep, or restart this room?"
 - **Both questions are asked in the bottom bar,** not in a dialog. A dialog opens over the AR view, where a tap meant for the room answered it as it opened (device runs, steps 4–6). Until it is answered, the room takes no taps ("Answer the question below first.") and the bar's other controls wait. Restart AR clears it.
@@ -197,7 +197,7 @@ The engine stays Viro, so reference photos stay on expo-camera. The photo step u
     - the three tape tries land within 3%;
     - the first floor-plane hit locks the height;
     - before the lock the preferred hit is used;
-    - a tap whose floor planes all lie > 10 cm from the lock is refused (step 5's real shifts), and the room takes no corner after it, even after Clear;
+    - a tap whose floor planes all lie > 10 cm from the lock is refused (step 5's real shifts), and the room takes no corner or opening after it, even after Clear;
     - a stale plane in front of a floor plane at the lock is not refused (ticket 19);
     - no hits gives `no-hit`;
     - an upward line of sight gives `no-hit`.

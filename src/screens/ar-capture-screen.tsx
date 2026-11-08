@@ -96,7 +96,7 @@ const TRACE_PROMPTS: Record<
   'floor-moved': {
     title: 'The floor moved',
     message:
-      'AR tracking shifted under this room, so the corner was not placed: new corners would not line up with the ones already traced. Restart the room, or keep its corners to finish it as it is.',
+      'AR tracking shifted under this room, so it takes no more corners or openings: they would not line up with the ones already traced. Restart the room, or keep its corners to finish it as it is.',
     keepLabel: 'Keep corners',
   },
 };
@@ -342,6 +342,11 @@ export function ArCaptureScreen() {
         }
         syncCorners();
       } else {
+        // An opening would not line up with the walls either (see 'floor-moved').
+        if (session.floorMoved) {
+          setTracePrompt('floor-moved');
+          return;
+        }
         const hit = openingHit(tap);
         if (hit === undefined) {
           showToast(NO_WALL_MESSAGE);
@@ -436,7 +441,8 @@ export function ArCaptureScreen() {
       showToast('Width must be between 0.1 m and 4 m.');
       return;
     }
-    sessionRef.current!.addOpening(
+    const session = sessionRef.current!;
+    const added = session.addOpening(
       pendingOpening.world,
       openingType,
       widthM,
@@ -444,6 +450,11 @@ export function ArCaptureScreen() {
     );
     setPendingOpening(null);
     setMode('corner');
+    // The floor moved while the panel was open, or Undo left fewer than two corners.
+    if (!added) {
+      if (session.floorMoved) setTracePrompt('floor-moved');
+      else showToast('Mark at least 2 corners before adding openings.');
+    }
   }, [openingType, openingWidth, pendingOpening, qualityNow, showToast]);
 
   const finishAndSave = useCallback((): boolean => {

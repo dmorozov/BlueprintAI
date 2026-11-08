@@ -76,17 +76,22 @@ export type CornerTapResult =
  * The session also holds the room's floor height, locked by its first corner tap on
  * the floor. Clear and Undo keep it; the next room, and a room traced again in a new
  * tracking frame, start a new session. Once a tap finds that the floor moved, the room
- * takes no new corner: ARCore's map moved under it, so a new corner would not line up
- * with the ones traced. Its corners stay, to finish the room with or undo.
+ * takes no new corner or opening: ARCore's map moved under it, so neither would line
+ * up with the corners traced. Its corners stay, to finish the room with or undo.
  */
 export class ArCaptureSession {
   private corners: ArCornerTap[] = [];
   private openingTaps: StoredOpening[] = [];
   private floorY: number | null = null;
-  private floorMoved = false;
+  private floorHasMoved = false;
 
   get cornerCount(): number {
     return this.corners.length;
+  }
+
+  /** Whether a corner tap found that the floor moved; the room then takes no input. */
+  get floorMoved(): boolean {
+    return this.floorHasMoved;
   }
 
   /** Floor-plane (x, z) positions of the recorded corners, in walking order. */
@@ -125,10 +130,10 @@ export class ArCaptureSession {
    * records nothing. After a `floor-shifted` refusal, every tap is refused that way.
    */
   tapCorner(tap: ArTap, quality: ArTrackingQuality): CornerTapResult {
-    if (this.floorMoved) return { ok: false, reason: 'floor-shifted' };
+    if (this.floorHasMoved) return { ok: false, reason: 'floor-shifted' };
     const placement = placeCorner(tap, this.floorY);
     if (!placement.ok) {
-      if (placement.reason === 'floor-shifted') this.floorMoved = true;
+      if (placement.reason === 'floor-shifted') this.floorHasMoved = true;
       return placement;
     }
     this.floorY = placement.floorY;
@@ -195,7 +200,8 @@ export class ArCaptureSession {
 
   /**
    * Adds a door/window at the tapped position on the nearest wall.
-   * @returns false when no wall could be located (fewer than two corners).
+   * @returns false when no wall could be located (fewer than two corners), or once the
+   * floor has moved.
    */
   addOpening(
     world: [number, number, number],
@@ -203,6 +209,7 @@ export class ArCaptureSession {
     widthM: number,
     quality: ArTrackingQuality,
   ): boolean {
+    if (this.floorHasMoved) return false;
     const location = this.locateOnWall(world);
     if (location === null) return false;
     this.openingTaps.push({ ...location, type, widthM, quality });

@@ -157,6 +157,20 @@ describe('ArCaptureSession corner taps and the room’s floor height', () => {
     expect(session.cornerCount).toBe(0);
   });
 
+  it('adds no opening once the floor has moved', () => {
+    const session = new ArCaptureSession();
+    session.tapCorner(SHIFT_LOCK, 'normal');
+    session.tapCorner(SHIFT_CORNER_2, 'normal');
+    // Halfway along the wall between the two corners.
+    const onWall: [number, number, number] = [0.9, -0.6, -0.55];
+    expect(session.addOpening(onWall, 'door', 0.85, 'normal')).toBe(true);
+    expect(session.floorMoved).toBe(false);
+    session.tapCorner(SHIFTED_FLOOR, 'normal');
+    expect(session.floorMoved).toBe(true);
+    expect(session.addOpening(onWall, 'window', 1.2, 'normal')).toBe(false);
+    expect(session.openingCount).toBe(1);
+  });
+
   it('takes a corner behind a stale floor plane on the room’s floor', () => {
     // Ticket 19, session 1: the room's first tap locked the floor at −1.653; 2 s later
     // a stale plane 27 cm higher lay in front of the floor plane at that height.
