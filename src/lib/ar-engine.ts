@@ -8,7 +8,9 @@ import type { ArTrackingQuality } from '@/lib/ar-capture';
  *
  * Engine health (the camera wait, failure reasons, the dead-session timeout and the
  * engine's own quirks) stays inside the engine component: the screen renders
- * {@link ArEngineStatus} and places corners from {@link ArTap}s.
+ * {@link ArEngineStatus} and places corners from {@link ArTap}s. The rules the screen
+ * applies to what the engine reports live here too: {@link placeCorner} and
+ * {@link TrackingLossWatch}.
  */
 
 export type Vec3 = [number, number, number];
@@ -147,4 +149,30 @@ function atHeight(camera: Vec3, through: Vec3, y: number): Vec3 | null {
     y,
     camera[2] + t * (through[2] - camera[2]),
   ];
+}
+
+/** Tracking lost at least this long mid-trace may have moved the tracking frame. */
+const LONG_LOSS_MS = 3000;
+
+/**
+ * Watches one engine session's status for a long interruption of tracking, after
+ * which the screen asks whether to keep the room's corners. Once the session has
+ * tracked, every status but tracking interrupts it: lost, starting again (back from
+ * the background) and dead. The start-up does not.
+ */
+export class TrackingLossWatch {
+  private tracked = false;
+  private lostSinceMs: number | null = null;
+
+  /** Takes the session's latest status; true when it ends a long loss. */
+  update(status: ArEngineStatus, nowMs: number): boolean {
+    if (status.kind !== 'tracking') {
+      if (this.tracked) this.lostSinceMs ??= nowMs;
+      return false;
+    }
+    this.tracked = true;
+    const lostSinceMs = this.lostSinceMs;
+    this.lostSinceMs = null;
+    return lostSinceMs !== null && nowMs - lostSinceMs >= LONG_LOSS_MS;
+  }
 }

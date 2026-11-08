@@ -1,6 +1,12 @@
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useEffectEvent,
+  useRef,
+  useState,
+} from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -24,6 +30,7 @@ import { Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { ArCaptureSession, type ArTrackingQuality } from '@/lib/ar-capture';
 import {
+  TrackingLossWatch,
   preferredHit,
   type ArEngineHandle,
   type ArEngineStatus,
@@ -45,6 +52,8 @@ import {
 } from '@/lib/session-store';
 
 const TOAST_DURATION_MS = 2500;
+const NO_SURFACE_MESSAGE =
+  'No surface detected — aim at the corner and move around slowly.';
 /** A fresh engine's status until it reports its own. */
 const ENGINE_STARTING: ArEngineStatus = {
   kind: 'starting',
@@ -93,6 +102,14 @@ export function ArCaptureScreen() {
   // (first mount, Restart AR, the photo step → Next room). Rooms saved under the same
   // frame line up without alignment; null only before the engine has mounted.
   const [frameId, setFrameId] = useState<string | null>(null);
+  // The mounted engine session's tracking, watched for a long loss mid-trace. A new
+  // watch per engine session, set when its frame starts.
+  const lossWatchRef = useRef<TrackingLossWatch | null>(null);
+
+  const handleFrameStart = useCallback((id: string) => {
+    setFrameId(id);
+    lossWatchRef.current = new TrackingLossWatch();
+  }, []);
 
   const [phase, setPhase] = useState<Phase>('checking');
   const [engineStatus, setEngineStatus] =
@@ -220,6 +237,20 @@ export function ArCaptureScreen() {
     [engineStatus],
   );
 
+  // Remounts the engine so ARCore re-initializes from scratch, and starts the room's
+  // trace again. Corners and the floor height are in THIS engine session's frame, so
+  // a new frame invalidates them.
+  const restartAr = useCallback(() => {
+    sessionRef.current = new ArCaptureSession();
+    setPendingOpening(null);
+    setMode('corner');
+    // The remounted engine reports its own status and its new tracking frame; until
+    // then a stale "Tracking good" must not hide a session that never starts.
+    setEngineStatus(ENGINE_STARTING);
+    syncCorners();
+    setSceneAttempt((attempt) => attempt + 1);
+  }, [syncCorners]);
+
   const handleSceneTap = useCallback(
     async (event: {
       nativeEvent: { locationX: number; locationY: number };
@@ -239,6 +270,8 @@ export function ArCaptureScreen() {
       }
       const engine = engineRef.current;
       if (engine === null) return;
+      // The trace this tap belongs to: Restart AR during the hit test discards it.
+      const session = sessionRef.current!;
       let tap: ArTap;
       try {
         tap = await engine.hitTest(
@@ -249,28 +282,47 @@ export function ArCaptureScreen() {
         showToast('Hit test failed — try again.');
         return;
       }
-      const hit = preferredHit(tap);
-      if (hit === undefined) {
-        showToast(
-          'No surface detected — aim at the corner and move around slowly.',
-        );
-        return;
-      }
-
-      const session = sessionRef.current!;
+      if (sessionRef.current !== session) return;
       if (mode === 'corner') {
+        const result = session.tapCorner(tap, quality);
+        if (!result.ok) {
+          if (result.reason === 'no-hit') {
+            showToast(NO_SURFACE_MESSAGE);
+            return;
+          }
+          // ARCore rebuilt its map: the floor under the tap is not the room's floor
+          // any more. Clear keeps the room's floor height, so only a fresh engine
+          // session gives the room a new one.
+          Alert.alert(
+            'The floor moved',
+            'Tracking was interrupted and the floor is no longer at this room’s floor height, so the corner was not placed. Restart the room to trace it again.',
+            [
+              { text: 'Keep tracing', style: 'cancel' },
+              {
+                text: 'Restart room',
+                style: 'destructive',
+                onPress: restartAr,
+              },
+            ],
+          );
+          return;
+        }
         // First meaningful input — the room comes into existence with this tap.
         ensureRoom();
         // Adding a corner shifts wall indices, which silently invalidates any
         // openings already recorded — say so instead of losing them invisibly.
-        const cleared = session.addCorner(hit.position, quality);
-        if (cleared > 0) {
+        if (result.clearedOpenings > 0) {
           showToast(
-            `Openings cleared (${cleared}) — corner order changed; re-add them.`,
+            `Openings cleared (${result.clearedOpenings}) — corner order changed; re-add them.`,
           );
         }
         syncCorners();
       } else {
+        const hit = preferredHit(tap);
+        if (hit === undefined) {
+          showToast(NO_SURFACE_MESSAGE);
+          return;
+        }
         const location = session.locateOnWall(hit.position);
         if (location === null) {
           showToast('Mark at least 2 corners before adding openings.');
@@ -290,6 +342,7 @@ export function ArCaptureScreen() {
       phase,
       mode,
       qualityNow,
+      restartAr,
       showToast,
       syncCorners,
     ],
@@ -316,20 +369,8 @@ export function ArCaptureScreen() {
   }, [syncCorners]);
 
   // Recovery for a wedged AR session (dead camera preview / tracking that never
-  // starts): remount the scene so ARCore re-initializes from scratch. Corners are
-  // world positions in THIS session's frame, so a new frame invalidates them —
-  // confirm before throwing a trace away.
+  // starts). Confirm before throwing a trace away.
   const handleRestartAr = useCallback(() => {
-    const restart = () => {
-      sessionRef.current!.clear();
-      setPendingOpening(null);
-      setMode('corner');
-      // The remounted engine reports its own status and its new tracking frame; until
-      // then a stale "Tracking good" must not hide a session that never starts.
-      setEngineStatus(ENGINE_STARTING);
-      syncCorners();
-      setSceneAttempt((attempt) => attempt + 1);
-    };
     if (cornerCount > 0) {
       Alert.alert(
         'Restart AR?',
@@ -338,13 +379,33 @@ export function ArCaptureScreen() {
         }). Corners are tied to this session's camera position and cannot be reused after a restart.`,
         [
           { text: 'Keep tracing', style: 'cancel' },
-          { text: 'Restart', style: 'destructive', onPress: restart },
+          { text: 'Restart', style: 'destructive', onPress: restartAr },
         ],
       );
     } else {
-      restart();
+      restartAr();
     }
-  }, [cornerCount, syncCorners]);
+  }, [cornerCount, restartAr]);
+
+  // A long loss may have moved the tracking frame under the corners traced before it
+  // (a trip to the background counts). Only mid-trace: a finished room is saved.
+  const warnAfterLongLoss = useEffectEvent(() => {
+    if (phase !== 'ready' || cornerCount === 0) return;
+    Alert.alert(
+      'Tracking was interrupted',
+      'Earlier corners may be off. Keep them, or restart this room?',
+      [
+        { text: 'Keep', style: 'cancel' },
+        { text: 'Restart room', style: 'destructive', onPress: restartAr },
+      ],
+    );
+  });
+
+  useEffect(() => {
+    if (lossWatchRef.current?.update(engineStatus, Date.now()) === true) {
+      warnAfterLongLoss();
+    }
+  }, [engineStatus]);
 
   const handleAddOpening = useCallback(() => {
     if (pendingOpening === null) return;
@@ -407,7 +468,8 @@ export function ArCaptureScreen() {
   }, [finishAndSave, roomId, roomName]);
 
   const handleNextRoom = useCallback(() => {
-    sessionRef.current!.clear();
+    // A new room: no corners, no floor height.
+    sessionRef.current = new ArCaptureSession();
     setPendingOpening(null);
     setMode('corner');
     // The AR scene stays mounted so tracking (and the shared frame) continues; only
@@ -488,19 +550,13 @@ export function ArCaptureScreen() {
   // next room joins via the align editor (the old frame is gone — auto-alignment
   // across this boundary would be invalid).
   const handlePhotoNextRoom = useCallback(() => {
-    // As Restart AR: the remounted engine reports its own status and frame.
-    setEngineStatus(ENGINE_STARTING);
-    setSceneAttempt((attempt) => attempt + 1);
-    sessionRef.current!.clear();
-    setPendingOpening(null);
-    setMode('corner');
+    restartAr();
     // The next room is created lazily on its first corner tap (see handleNextRoom).
     setRoomId(null);
     setRoomName('');
-    syncCorners();
     setPhotos([]);
     setPhase('ready');
-  }, [syncCorners]);
+  }, [restartAr]);
 
   const handlePhotoDone = useCallback(() => {
     if (roomId === null) return; // unreachable: the photo step follows a finished room
@@ -706,7 +762,7 @@ export function ArCaptureScreen() {
             ref={engineRef}
             markers={cornerWorlds}
             onStatusChange={setEngineStatus}
-            onFrameStart={setFrameId}
+            onFrameStart={handleFrameStart}
           />
         </View>
 

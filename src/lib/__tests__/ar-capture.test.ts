@@ -7,6 +7,18 @@ import {
   toFloorPoint,
 } from '@/lib/ar-capture';
 
+import {
+  FLOOR_BEFORE_GHOST,
+  GHOST_FLOOR,
+  TAPE_M,
+  TRY2_END,
+  TRY2_FLOOR_Y,
+  TRY2_START,
+  TRY3_END,
+  TRY3_START,
+  planDistance,
+} from './ticket-19-taps';
+
 /** Builds a session tracing a 3 x 4 m rectangle (floor plane, walking order). */
 function makeRectSession(qualities?: ('normal' | 'limited')[]) {
   const session = new ArCaptureSession();
@@ -87,6 +99,66 @@ describe('ArCaptureSession corner bookkeeping', () => {
     expect(session.addOpening([1.5, 0, 0], 'door', 0.85, 'normal')).toBe(true);
     expect(session.addCorner([1, 1.5, 4], 'normal')).toBe(1);
     expect(session.openingCount).toBe(0);
+  });
+});
+
+describe('ArCaptureSession corner taps and the room’s floor height', () => {
+  it('keeps the floor height across Clear, so a tap on the tape case still lands on the floor', () => {
+    // Ticket 19, tries 2 and 3 in one room with Clear between them. Try 3 hits no
+    // floor plane; with its own nearest hits it measured −46%.
+    const session = new ArCaptureSession();
+    session.tapCorner(TRY2_START, 'normal');
+    session.clear();
+    session.tapCorner(TRY3_START, 'normal');
+    session.tapCorner(TRY3_END, 'normal');
+    const [start, end] = session.cornerWorldPositions;
+    expect(Math.abs(planDistance(start!, end!) / TAPE_M - 1)).toBeLessThan(
+      0.03,
+    );
+  });
+
+  it('keeps the floor height when Undo removes the corner that locked it', () => {
+    const session = new ArCaptureSession();
+    session.tapCorner(TRY2_START, 'normal');
+    session.undoCorner();
+    session.tapCorner(TRY3_START, 'normal');
+    expect(session.cornerWorldPositions[0]![1]).toBe(TRY2_FLOOR_Y);
+  });
+
+  it('refuses a corner on a floor that moved and keeps the trace as it was', () => {
+    // Ticket 19, session 1: the room's first tap locked the floor at −1.653; 2 s later,
+    // after ARCore rebuilt its map, the floor plane under a tap was 27 cm higher.
+    const session = new ArCaptureSession();
+    expect(session.tapCorner(FLOOR_BEFORE_GHOST, 'normal')).toEqual({
+      ok: true,
+      clearedOpenings: 0,
+    });
+    expect(session.tapCorner(GHOST_FLOOR, 'normal')).toEqual({
+      ok: false,
+      reason: 'floor-shifted',
+    });
+    expect(session.cornerWorldPositions).toEqual([[0.588, -1.653, 0.947]]);
+  });
+
+  it('places nothing for a tap that hit nothing', () => {
+    const session = new ArCaptureSession();
+    expect(
+      session.tapCorner({ camera: [0, 0, 0], hits: [] }, 'normal'),
+    ).toEqual({ ok: false, reason: 'no-hit' });
+    expect(session.cornerCount).toBe(0);
+  });
+
+  it('reports the openings a corner tap discards', () => {
+    const session = new ArCaptureSession();
+    session.tapCorner(TRY2_START, 'normal');
+    session.tapCorner(TRY2_END, 'normal');
+    expect(session.addOpening([-0.3, -1.6, 0.9], 'door', 0.85, 'normal')).toBe(
+      true,
+    );
+    expect(session.tapCorner(TRY3_END, 'normal')).toEqual({
+      ok: true,
+      clearedOpenings: 1,
+    });
   });
 });
 

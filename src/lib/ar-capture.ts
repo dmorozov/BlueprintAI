@@ -1,3 +1,4 @@
+import { placeCorner, type ArTap, type CornerPlacement } from '@/lib/ar-engine';
 import { validateFloorPlan, type FloorPlan } from '@/lib/blueprint-schema';
 
 /**
@@ -15,8 +16,8 @@ import { validateFloorPlan, type FloorPlan } from '@/lib/blueprint-schema';
  * session share the same tracking frame, so they can be merged into a combined plan by
  * plain geometry union (see mergeSameFramePlans) — no alignment or AI involved.
  *
- * Pure TypeScript with no runtime imports beyond the schema validator: the same code
- * runs in Hermes and under Node for testing.
+ * Pure TypeScript with no runtime imports beyond the corner rule and the schema
+ * validator: the same code runs in Hermes and under Node for testing.
  */
 
 /** Tracking quality at the moment of a tap, mapped from ViroReact's tracking state. */
@@ -59,13 +60,27 @@ function slugify(label: string): string {
   return slug !== '' ? slug : 'room';
 }
 
+/** A corner tap's outcome: a Corner, or why none was placed (see placeCorner). */
+export type CornerTapResult =
+  | {
+      ok: true;
+      /** Openings the new corner discarded (see `addCorner`). */
+      clearedOpenings: number;
+    }
+  | Extract<CornerPlacement, { ok: false }>;
+
 /**
  * One room's in-progress AR capture. Corner taps are stored in walking order; the
  * polygon closes automatically (last corner connects back to the first).
+ *
+ * The session also holds the room's floor height, locked by its first corner tap on
+ * the floor. Clear and Undo keep it; the next room, and a room traced again in a new
+ * tracking frame, start a new session.
  */
 export class ArCaptureSession {
   private corners: ArCornerTap[] = [];
   private openingTaps: StoredOpening[] = [];
+  private floorY: number | null = null;
 
   get cornerCount(): number {
     return this.corners.length;
@@ -103,6 +118,20 @@ export class ArCaptureSession {
   }
 
   /**
+   * Places a Corner for a tap at the room's floor height and records it; a refused tap
+   * records nothing.
+   */
+  tapCorner(tap: ArTap, quality: ArTrackingQuality): CornerTapResult {
+    const placement = placeCorner(tap, this.floorY);
+    if (!placement.ok) return placement;
+    this.floorY = placement.floorY;
+    return {
+      ok: true,
+      clearedOpenings: this.addCorner(placement.corner, quality),
+    };
+  }
+
+  /**
    * Removes the last corner.
    * @returns how many recorded openings were discarded (see `addCorner`).
    */
@@ -113,6 +142,7 @@ export class ArCaptureSession {
     return cleared;
   }
 
+  /** Removes every corner and opening; the room keeps its floor height. */
   clear(): void {
     this.corners = [];
     this.openingTaps = [];

@@ -12,8 +12,8 @@ importers:
         specifier: ~57.0.18
         version: 57.0.18(@babel/core@7.29.7(supports-color@8.1.1))(@types/react@19.2.18)(expo@57.0.22)(react-dom@19.2.3(react@19.2.3))(react-native-worklets@0.10.1(@babel/core@7.29.7(supports-color@8.1.1))(@react-native/metro-config@0.87.1(@babel/core@7.29.7(supports-color@8.1.1))(supports-color@8.1.1))(react-native@0.86.3(@babel/core@7.29.7(supports-color@8.1.1))(@react-native/metro-config@0.87.1(@babel/core@7.29.7(supports-color@8.1.1))(supports-color@8.1.1))(@types/react@19.2.18)(react@19.2.3)(supports-color@8.1.1))(react@19.2.3)(supports-color@8.1.1))(react-native@0.86.3(@babel/core@7.29.7(supports-color@8.1.1))(@react-native/metro-config@0.87.1(@babel/core@7.29.7(supports-color@8.1.1))(supports-color@8.1.1))(@types/react@19.2.18)(react@19.2.3)(supports-color@8.1.1))(react@19.2.3)
       '@reactvision/react-viro':
-        specifier: 2.58.1
-        version: 2.58.1(expo@57.0.22)(react-native-web@0.21.2(react-dom@19.2.3(react@19.2.3))(react@19.2.3))(react-native@0.86.3(@babel/core@7.29.7(supports-color@8.1.1))(@react-native/metro-config@0.87.1(@babel/core@7.29.7(supports-color@8.1.1))(supports-color@8.1.1))(@types/react@19.2.18)(react@19.2.3)(supports-color@8.1.1))(react@19.2.3)
+        specifier: 3.0.3
+        version: 3.0.3(expo@57.0.22)(react-native-web@0.21.2(react-dom@19.2.3(react@19.2.3))(react@19.2.3))(react-native@0.86.3(@babel/core@7.29.7(supports-color@8.1.1))(@react-native/metro-config@0.87.1(@babel/core@7.29.7(supports-color@8.1.1))(supports-color@8.1.1))(@types/react@19.2.18)(react@19.2.3)(supports-color@8.1.1))(react@19.2.3)
       expo:
         specifier: ~57.0.22
         version: 57.0.22(@babel/core@7.29.7(supports-color@8.1.1))(@expo/dom-webview@57.0.1)(@expo/metro-runtime@57.0.15)(expo-router@57.0.21)(react-dom@19.2.3(react@19.2.3))(react-native-web@0.21.2(react-dom@19.2.3(react@19.2.3))(react@19.2.3))(react-native-worklets@0.10.1(@babel/core@7.29.7(supports-color@8.1.1))(@react-native/metro-config@0.87.1(@babel/core@7.29.7(supports-color@8.1.1))(supports-color@8.1.1))(react-native@0.86.3(@babel/core@7.29.7(supports-color@8.1.1))(@react-native/metro-config@0.87.1(@babel/core@7.29.7(supports-color@8.1.1))(supports-color@8.1.1))(@types/react@19.2.18)(react@19.2.3)(supports-color@8.1.1))(react@19.2.3)(supports-color@8.1.1))(react-native@0.86.3(@babel/core@7.29.7(supports-color@8.1.1))(@react-native/metro-config@0.87.1(@babel/core@7.29.7(supports-color@8.1.1))(supports-color@8.1.1))(@types/react@19.2.18)(react@19.2.3)(supports-color@8.1.1))(react@19.2.3)(supports-color@8.1.1)(typescript@6.0.3)
@@ -1134,16 +1134,19 @@ packages:
       '@types/react':
         optional: true
 
-  '@reactvision/react-viro@2.58.1':
-    resolution: {integrity: sha512-BHlS7geHXS8354mGzSoyjjhg9d3E1QLJh+6+YIt89yuaz34JT3EWw2KV/Ikglfo71CKIO3Nj1A3tGf7/giogUA==}
-    engines: {react-native: '>=0.83.0 <0.87.0'}
+  '@reactvision/react-viro@3.0.3':
+    resolution: {integrity: sha512-OzIjwUtYL6lAH/NReahm4yyoWc6vMpipXYsDdYAnoE1C73iOL4rD8a/u9uypp/W8XS8gW1ts05ddeD0z2auREg==}
+    engines: {react-native: '>=0.86.0 <0.87.0'}
     peerDependencies:
-      '@reactvision/viro-web-renderer': '>=0.0.1'
-      expo: '>=55.0.0 <58.0.0'
-      react: '>=18.0.0'
-      react-native: '>=0.83.0 <0.87.0'
+      '@reactvision/react-native-visionos': '>=0.86.0 <0.87.0'
+      '@reactvision/viro-web-renderer': ^1.0.1
+      expo: '>=57.0.0 <58.0.0'
+      react: '>=19.0.0'
+      react-native: '>=0.86.0 <0.87.0'
       react-native-web: '>=0.19.0'
     peerDependenciesMeta:
+      '@reactvision/react-native-visionos':
+        optional: true
       '@reactvision/viro-web-renderer':
         optional: true
       expo:
@@ -5728,7 +5731,7 @@ snapshots:
     optionalDependencies:
       '@types/react': 19.2.18
 
-  '@reactvision/react-viro@2.58.1(expo@57.0.22)(react-native-web@0.21.2(react-dom@19.2.3(react@19.2.3))(react@19.2.3))(react-native@0.86.3(@babel/core@7.29.7(supports-color@8.1.1))(@react-native/metro-config@0.87.1(@babel/core@7.29.7(supports-color@8.1.1))(supports-color@8.1.1))(@types/react@19.2.18)(react@19.2.3)(supports-color@8.1.1))(react@19.2.3)':
+  '@reactvision/react-viro@3.0.3(expo@57.0.22)(react-native-web@0.21.2(react-dom@19.2.3(react@19.2.3))(react@19.2.3))(react-native@0.86.3(@babel/core@7.29.7(supports-color@8.1.1))(@react-native/metro-config@0.87.1(@babel/core@7.29.7(supports-color@8.1.1))(supports-color@8.1.1))(@types/react@19.2.18)(react@19.2.3)(supports-color@8.1.1))(react@19.2.3)':
     dependencies:
       react: 19.2.3
       react-native: 0.86.3(@babel/core@7.29.7(supports-color@8.1.1))(@react-native/metro-config@0.87.1(@babel/core@7.29.7(supports-color@8.1.1))(supports-color@8.1.1))(@types/react@19.2.18)(react@19.2.3)(supports-color@8.1.1)

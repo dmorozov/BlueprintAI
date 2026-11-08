@@ -139,14 +139,17 @@ describe('toArHit', () => {
     expect(toArHit(viroHit('ExistingPlane'))).toBeNull();
   });
 
-  // Provisional: ARCore gives a horizontal plane's pose a yaw only and a wall's pose a
-  // 90° tilt. Spec step 4 checks this against rotations recorded on the phone.
-  it('tells floor-like planes from walls by the hit pose’s tilt', () => {
+  // Plane hits recorded on the S22 Ultra (step 4, 2026-10-17), all on one floor at
+  // −0.98 m or one wall facing the camera. Viro keeps the middle angle within ±90°, so
+  // the floor seen after turning comes out as (180, y, −180) as well as (0, y, 0).
+  it('tells the floor from a wall by the hit pose’s normal, whichever way the camera faces', () => {
     const facesUp = (rotation: [number, number, number]) =>
       toArHit(viroHit('ExistingPlaneUsingExtent', rotation))?.facesUp;
-    expect(facesUp([0, 37, 0])).toBe(true);
-    expect(facesUp([4, -120, -6])).toBe(true);
-    expect(facesUp([90, 0, 0])).toBe(false);
-    expect(facesUp([0, 15, -90])).toBe(false);
+    expect(facesUp([0.0, -26.7, -0.0])).toBe(true);
+    expect(facesUp([0.0, -81.7, -0.0])).toBe(true);
+    expect(facesUp([180.0, -87.2, -180.0])).toBe(true);
+    expect(facesUp([180.0, -89.6, -180.0])).toBe(true);
+    expect(facesUp([90.1, -8.4, 179.2])).toBe(false);
+    expect(facesUp([92.7, 5.1, 28.1])).toBe(false);
   });
 });

@@ -155,7 +155,8 @@ interface ArEngineViewProps {
   | UNAVAILABLE after tracking | lost (names the camera holder when there is one) |
 
 - **Hit mapping:**
-  - `ExistingPlaneUsingExtent` → `plane`. `facesUp` is true when the hit pose's pitch and roll are both under 15°; **verify on the device**.
+  - `ExistingPlaneUsingExtent` → `plane`. `facesUp` is true when the hit pose's normal (its Y axis) is within 15° of straight up.
+    - Checked on the device in step 4. Viro's rotation is Euler degrees applied X, then Y, then Z, with the middle angle kept within ±90°, so a floor reads (0, y, 0) or (180, y, ±180). The first rule, pitch and roll under 15°, missed the second form.
   - `FeaturePoint` and `DepthPoint` → `point`.
   - `EstimatedHorizontalPlane` (a plane's unbounded extension, which continues behind walls) is dropped.
   - The camera position comes from `getCameraOrientationAsync`, fetched in parallel with the hit test.
@@ -275,7 +276,7 @@ Phone: Samsung Galaxy S22 Ultra `SM-S908U`, Android 16, security patch 2026-08-0
     - **ARCore's own #1784/#1785** report a camera-to-motion-sensor clock-offset issue. The S22U logged that warning once (−5.9 ms) without effect.
     - There is no second test device.
   - **ARCore updates arrive silently** (1.56 → 1.57 during this work). Re-run plan rows 1, 5 and 6 when the version changes.
-  - **`facesUp` from Viro's hit pose is unverified;** step 4 checks it first.
+  - **`facesUp` depends on how Viro reports a hit pose's rotation** (checked on 2.58.1 in step 4); re-check it after a Viro upgrade.
   - **Single-device evidence,** and one length session (3 tries) under the final rule. Plan row 6 repeats it.
 
 ## Out of Scope

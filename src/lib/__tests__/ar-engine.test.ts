@@ -1,86 +1,28 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  TrackingLossWatch,
   placeCorner,
   preferredHit,
+  type ArEngineStatus,
   type ArTap,
   type Vec3,
 } from '@/lib/ar-engine';
 
-// Real taps on the S22 Ultra (ticket 19, 2026-10-15): a 3 ft (0.9144 m) tape on the
-// floor, each end tapped through the app with depth on, 1.3–2.0 m from the camera.
-// Plane hits are the floor plane; points are feature or depth points (Viro reports
-// both as FeaturePoint).
-const TAPE_M = 0.9144;
-const plane = (position: Vec3) => ({
-  kind: 'plane' as const,
-  position,
-  facesUp: true,
-});
-const point = (position: Vec3) => ({
-  kind: 'point' as const,
-  position,
-  facesUp: false,
-});
-
-/** Try 1, tape start: the floor plane under the tap. */
-const TRY1_START: ArTap = {
-  camera: [-0.469, -0.486, 1.944],
-  hits: [plane([-0.883, -1.639, 1.487]), point([-0.878, -1.644, 1.482])],
-};
-/** Try 1, tape end: the nearest point is 10 cm above the floor (the tape case). */
-const TRY1_END: ArTap = {
-  camera: [-0.46, -0.485, 1.947],
-  hits: [
-    point([-0.237, -1.541, 0.955]),
-    point([-0.232, -1.542, 0.967]),
-    point([-0.217, -1.636, 0.866]),
-  ],
-};
-/** Try 2, tape start: the floor plane under the tap. */
-const TRY2_START: ArTap = {
-  camera: [-0.379, -0.406, 1.985],
-  hits: [plane([-0.658, -1.622, 1.268]), point([-0.652, -1.624, 1.266])],
-};
-/** The floor height of try 2's start tap. */
-const TRY2_FLOOR_Y = -1.622;
-/** Try 2, tape end: floor-level points only. */
-const TRY2_END: ArTap = {
-  camera: [-0.371, -0.408, 1.99],
-  hits: [
-    point([0.011, -1.618, 0.631]),
-    point([0.004, -1.607, 0.64]),
-    point([0.036, -1.697, 0.542]),
-  ],
-};
-
-/** Try 3, tape start: the nearest point is 26 cm above the floor (the tape case). */
-const TRY3_START: ArTap = {
-  camera: [-0.311, -0.364, 1.996],
-  hits: [
-    point([0.46, -1.358, 0.426]),
-    point([0.653, -1.591, 0.058]),
-    point([0.679, -1.624, 0.006]),
-  ],
-};
-/** Try 3, tape end: floor-level points only. */
-const TRY3_END: ArTap = {
-  camera: [-0.306, -0.371, 2.0],
-  hits: [point([0.003, -1.623, 0.603]), point([0.002, -1.612, 0.622])],
-};
-
-/**
- * Ticket 19, session 1, after ARCore rebuilt its map: two floor planes 27 cm apart
- * along one line of sight. The room had locked its floor at the lower one.
- */
-const GHOST_FLOOR: ArTap = {
-  camera: [-0.165, -0.353, 0.638],
-  hits: [
-    plane([-0.38, -1.382, 1.487]),
-    plane([-0.436, -1.653, 1.71]),
-    point([-0.443, -1.688, 1.738]),
-  ],
-};
+import {
+  GHOST_FLOOR,
+  TAPE_M,
+  TRY1_END,
+  TRY1_START,
+  TRY2_END,
+  TRY2_FLOOR_Y,
+  TRY2_START,
+  TRY3_END,
+  TRY3_START,
+  planDistance,
+  plane,
+  point,
+} from './ticket-19-taps';
 
 function cornerOf(tap: ArTap, floorY: number | null): Vec3 {
   const placement = placeCorner(tap, floorY);
@@ -88,11 +30,8 @@ function cornerOf(tap: ArTap, floorY: number | null): Vec3 {
   return placement.corner;
 }
 
-/** Wall length in plan, as ArCaptureSession measures it (floor-plane distance). */
-const planDistance = (a: Vec3, b: Vec3) => Math.hypot(a[0] - b[0], a[2] - b[2]);
-
 describe('placeCorner', () => {
-  it('measures every tape try within 3%, keeping the room’s floor height across Clear', () => {
+  it('measures every tape try within 3% with the first try’s floor height', () => {
     let floorY: number | null = null;
     for (const [start, end] of [
       [TRY1_START, TRY1_END],
@@ -190,5 +129,76 @@ describe('preferredHit', () => {
     expect(preferredHit({ camera: [0, 0, 0], hits: [near, wall] })).toBe(wall);
     expect(preferredHit({ camera: [0, 0, 0], hits: [near] })).toBe(near);
     expect(preferredHit({ camera: [0, 0, 0], hits: [] })).toBeUndefined();
+  });
+});
+
+// Statuses as the S22 Ultra showed them (step 2 smoke test, 2026-10-17).
+const STARTING: ArEngineStatus = { kind: 'starting', waitingForCamera: false };
+const GOOD: ArEngineStatus = {
+  kind: 'tracking',
+  quality: 'normal',
+  advice: null,
+};
+const LIMITED: ArEngineStatus = {
+  kind: 'tracking',
+  quality: 'limited',
+  advice: 'moving too fast, slow down',
+};
+const LOST: ArEngineStatus = {
+  kind: 'lost',
+  reason: 'Tracking lost — move the phone slowly, or tap Restart AR below.',
+};
+const DARK: ArEngineStatus = {
+  kind: 'lost',
+  reason: 'Tracking lost — too dark, turn on a light, or tap Restart AR below.',
+};
+
+describe('TrackingLossWatch', () => {
+  it('ends a long loss when tracking returns 3 s or more after it was lost', () => {
+    const watch = new TrackingLossWatch();
+    expect(watch.update(STARTING, 0)).toBe(false);
+    expect(watch.update(GOOD, 2_900)).toBe(false);
+    expect(watch.update(LOST, 10_000)).toBe(false);
+    expect(watch.update(GOOD, 13_000)).toBe(true);
+  });
+
+  it('does not count the start-up as a loss', () => {
+    // A cold start on the S22 Ultra reached "Tracking good" 3.24 s after the tap.
+    const watch = new TrackingLossWatch();
+    expect(watch.update(STARTING, 0)).toBe(false);
+    expect(watch.update(GOOD, 3_240)).toBe(false);
+  });
+
+  it('does not count a short loss', () => {
+    // Before the resume fix, the phone showed "Tracking lost" for 0.8–0.9 s.
+    const watch = new TrackingLossWatch();
+    watch.update(GOOD, 0);
+    expect(watch.update(LOST, 1_000)).toBe(false);
+    expect(watch.update(GOOD, 1_900)).toBe(false);
+  });
+
+  it('counts a trip to the background, which is starting until tracking returns', () => {
+    // Home for 5 s: starting 0.2 s after Home, "Tracking good" 1.55 s after the return.
+    const watch = new TrackingLossWatch();
+    watch.update(GOOD, 0);
+    expect(watch.update(STARTING, 200)).toBe(false);
+    expect(watch.update(GOOD, 6_550)).toBe(true);
+  });
+
+  it('times a loss from its start while its reason changes', () => {
+    const watch = new TrackingLossWatch();
+    watch.update(GOOD, 0);
+    watch.update(LOST, 1_000);
+    expect(watch.update(DARK, 3_000)).toBe(false);
+    expect(watch.update(GOOD, 4_100)).toBe(true);
+  });
+
+  it('takes limited tracking as tracking', () => {
+    const watch = new TrackingLossWatch();
+    watch.update(GOOD, 0);
+    expect(watch.update(LIMITED, 1_000)).toBe(false);
+    expect(watch.update(GOOD, 5_000)).toBe(false);
+    watch.update(LOST, 6_000);
+    expect(watch.update(LIMITED, 9_500)).toBe(true);
   });
 });

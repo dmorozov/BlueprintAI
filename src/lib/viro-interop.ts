@@ -71,12 +71,25 @@ export function viroHitTestPoint(
   ];
 }
 
+/** A hit pose's rotation (react-viro does not export the type). */
+type ViroRotation = ViroARHitTestResult['transform']['rotation'];
+
+/** A plane hit whose normal is within this of straight up faces up (degrees). */
+const FACES_UP_TILT_DEG = 15;
+
 /**
- * A plane hit whose pose is tilted less than this (pitch and roll, degrees) is
- * horizontal: ARCore gives a horizontal plane's pose a yaw only and a wall's a 90°
- * tilt. Not yet checked against rotations recorded on the phone.
+ * The up component of a hit pose's normal (its Y axis), from Viro's rotation: Euler
+ * angles in degrees, applied X first, then Y, then Z. Viro keeps the middle angle
+ * within ±90°, so the same floor reads (0, y, 0) or (180, y, ±180) depending on which
+ * way the camera faces, and a wall (90, y, anything); on the S22 Ultra, step 4.
  */
-const HORIZONTAL_TILT_DEG = 15;
+function normalUp([x, y, z]: ViroRotation): number {
+  const rad = Math.PI / 180;
+  return (
+    Math.cos(x * rad) * Math.cos(z * rad) +
+    Math.sin(x * rad) * Math.sin(y * rad) * Math.sin(z * rad)
+  );
+}
 
 /**
  * Maps one of Viro's hit-test results to the AR engine seam's hit, or null for a hit
@@ -98,12 +111,11 @@ export function toArHit(result: ViroARHitTestResult): ArHit | null {
     return { kind: 'point', position, facesUp: false };
   }
   if (result.type !== 'ExistingPlaneUsingExtent') return null;
-  const [pitch, , roll] = result.transform.rotation;
   return {
     kind: 'plane',
     position,
     facesUp:
-      Math.abs(pitch) < HORIZONTAL_TILT_DEG &&
-      Math.abs(roll) < HORIZONTAL_TILT_DEG,
+      normalUp(result.transform.rotation) >
+      Math.cos((FACES_UP_TILT_DEG * Math.PI) / 180),
   };
 }
