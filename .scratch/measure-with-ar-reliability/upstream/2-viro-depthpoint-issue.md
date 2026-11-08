@@ -3,14 +3,14 @@ DRAFT (ticket 06) — open as a NEW issue on https://github.com/ReactVision/viro
 Title: Android: performARHitTestWithPoint never returns DepthPoint — depth hits arrive as FeaturePoint
 -->
 
-**Setup:** `@reactvision/react-viro` 2.58.1 (also checked in virocore `v3.0.3` and `main`), `ViroARSceneNavigator depthEnabled`, Samsung Galaxy S22 Ultra, Android 16, Google Play Services for AR 1.57.262640093.
+**Setup:** `@reactvision/react-viro` 3.0.3 (first seen on 2.58.1; the code below is the same in virocore `v3.0.3` and on `main`), `ViroARSceneNavigator depthEnabled`, Samsung Galaxy S22 Ultra, Android 16, Google Play Services for AR 1.57.262640293.
 
 ### What happens
 
 With `depthEnabled`, `onDepthReady` fires about 2 s after the session starts, and depth hits do come back from ARCore. But every one of them reaches JS as `type: "FeaturePoint"` with `hasDepthData: false`. `DepthPoint` never appears.
 
 We confirmed depth is working underneath on a plain painted wall:
-- **Depth on:** 10 of 10 taps returned a hit, all within 4.5 cm of one plane.
+- **Depth on:** 10 of 10 taps returned a hit, all within 4.5 cm of one plane (2.58.1). On 3.0.3 the wall again took 10 of 10 taps, and every hit that was not on a detected plane came back as `FeaturePoint`.
 - **Depth off:** the same wall gave no hit on its plain upper part.
 
 ### Cause

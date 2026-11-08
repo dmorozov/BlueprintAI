@@ -274,7 +274,7 @@ S22U `R5CTA2PB2ZX`, Play Services for AR 1.57.262640293 (unchanged since step 5)
 ## After that
 
 - All six spec steps are done. Open items:
-  - **Ticket 06:** post the four upstream drafts in `upstream/` and send the links back so they can be recorded.
+  - **Ticket 06:** the four upstream drafts in `upstream/` are refreshed for 3.0.3 (2026-11-07; see the ticket). The user posts them and sends the links back so they can be recorded.
   - **Decisions for the user:** the long loss between rooms (left for later); after "The floor moved" → Keep tracing, point-only taps still use the old floor height.
   - Done since: the questions moved to the bottom bar (see "Fix: questions in the bottom bar").
   - **Row 6 method:** repeat with a tape of 2–3 m when one is available.

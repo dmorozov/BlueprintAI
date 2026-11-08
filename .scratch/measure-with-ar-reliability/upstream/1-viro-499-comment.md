@@ -5,7 +5,7 @@ DRAFT (ticket 06) — post as a comment on https://github.com/ReactVision/viro/i
 
 Here is logcat from a Samsung Galaxy S22 Ultra on Android 16. In our case the black view turned out to be our app's own mistake, but tracking it down exposed a Viro gap that makes this class of report hard to diagnose.
 
-**Setup:** Samsung Galaxy S22 Ultra (SM-S908U), Android 16 (API 36, security patch 2026-08-05), Google Play Services for AR 1.56.262080393 (later 1.57.262640093), `@reactvision/react-viro` 2.58.1, Expo SDK 57, React Native 0.86.3 (New Architecture), development build.
+**Setup:** Samsung Galaxy S22 Ultra (SM-S908U), Android 16 (API 36, security patch 2026-08-05), Google Play Services for AR 1.56.262080393 (later 1.57.262640293), `@reactvision/react-viro` 2.58.1 and then 3.0.3, Expo SDK 57, React Native 0.86.3 (New Architecture), development and release builds.
 
 ### Our black view: the AR scene was rendered without a navigator
 
@@ -26,7 +26,7 @@ I ViroARCore: Selected camera config 2: CPU image 1920x1080 (status=0)
 I Viro    : AR session resumed
 ```
 
-With the navigator mounted, the app reached `TRACKING_NORMAL` on 10 of 10 cold launches, 1.3–3.6 s after `onAttachedToWindow`. Background→foreground, and returning from an expo-camera screen, also tracked every time. Google's `hello_ar_kotlin` tracks on this phone too.
+With the navigator mounted, the app reached `TRACKING_NORMAL` on 10 of 10 cold launches, 1.3–3.6 s after `onAttachedToWindow`. Background→foreground, and returning from an expo-camera screen, also tracked every time. After upgrading to 3.0.3 we ran the same checks again, on a debug and on a release build, with the same result (10 of 10 cold launches each). Google's `hello_ar_kotlin` tracks on this phone too.
 
 **A quick check for others seeing a black background:** if logcat has no `=== onAttachedToWindow START ===` and no `AR session resumed`, no AR engine was created, and the cause is in the app's component tree rather than in ARCore. If those lines are there and tracking still never arrives, the logs below are what would separate the two cases.
 
@@ -34,9 +34,9 @@ With the navigator mounted, the app reached `TRACKING_NORMAL` on 10 of 10 cold l
 
 When ARCore does fail, Viro gives the app nothing to act on:
 
-- **Session creation, resume and per-frame update ignore ARCore's `ArStatus`.** In `android/viroar/src/main/cpp/arcore/ARCore_Native.cpp` (v2.58.1), `SessionNative::resume()` and `SessionNative::update()` call `ArSession_resume` and `ArSession_update` and drop the result, as does the `ArSession_create` call in the `SessionNative` constructor.
+- **Session creation, resume and per-frame update ignore ARCore's `ArStatus`.** In `android/viroar/src/main/cpp/arcore/ARCore_Native.cpp` (v2.58.1, unchanged in v3.0.3), `SessionNative::resume()` and `SessionNative::update()` call `ArSession_resume` and `ArSession_update` and drop the result, as does the `ArSession_create` call in the `SessionNative` constructor.
 - **"AR session resumed" is logged even when the resume failed.** `VROARSessionARCore::run()` logs it unconditionally.
 - **Start-up failures go only to logcat.** `StartupListenerARCore.onFailure` in `VRTARSceneNavigator` logs `onRendererFailed [error: X], message [Y]` and does not reach JS.
 - **The result:** a failed session looks exactly like a slow one (forced `TRACKING_UNAVAILABLE`, then silence). Our app now reads its own logcat to find reasons, which is fragile.
 
-**Offer:** we have a patch that adds an `onSessionError` event to `ViroARScene`, carrying the operation, the raw `ArStatus` and its name. It reports failed `ArSession_resume` and `ArSession_update` calls (update only when the status changes), plus the start-up failures that today only reach the `onRendererFailed` log line. It follows the same path as your `onDepthReady` (virocore + bridge + `ViroEvents`). It compiles on v2.58.1 and applies cleanly to 3.0.1. We have not run it on a device yet. Would you take it as a PR?
+**Offer:** we have a patch that adds an `onSessionError` event to `ViroARScene`, carrying the operation, the raw `ArStatus` and its name. It reports failed `ArSession_resume` and `ArSession_update` calls (update only when the status changes), plus the start-up failures that today only reach the `onRendererFailed` log line. It follows the same path as your `onDepthReady` (virocore + bridge + `ViroEvents`). It compiles on v2.58.1, and we have a copy rebased onto v3.0.3 that applies cleanly (only one `#include` context line moved). We have not built it on 3.0.3 or run it on a device yet. Would you take it as a PR?
