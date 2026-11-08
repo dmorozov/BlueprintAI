@@ -103,7 +103,8 @@ function normalUp([x, y, z]: ViroRotation): number {
  * anything but a plane, so its `DepthPoint` branch never runs (through 3.0.3).
  * `ExistingPlane` is iOS-only: ARKit's plane without its extent (not device-verified).
  * Unbounded planes are dropped because they continue behind walls and furniture: a
- * tap low on a wall can hit the floor's extension behind it.
+ * tap low on a wall can hit the floor's extension behind it. A detected floor can
+ * reach behind a wall too, which `openingHit` handles.
  */
 export function toArHit(result: ViroARHitTestResult): ArHit | null {
   const position = result.transform.position as Vec3;

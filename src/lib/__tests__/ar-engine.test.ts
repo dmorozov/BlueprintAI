@@ -2,9 +2,11 @@ import { describe, expect, it } from 'vitest';
 
 import {
   TrackingLossWatch,
+  openingHit,
   placeCorner,
   preferredHit,
   type ArEngineStatus,
+  type ArHit,
   type ArTap,
   type Vec3,
 } from '@/lib/ar-engine';
@@ -129,6 +131,55 @@ describe('preferredHit', () => {
     expect(preferredHit({ camera: [0, 0, 0], hits: [near, wall] })).toBe(wall);
     expect(preferredHit({ camera: [0, 0, 0], hits: [near] })).toBe(near);
     expect(preferredHit({ camera: [0, 0, 0], hits: [] })).toBeUndefined();
+  });
+});
+
+// Real opening taps on a plain wall, 1.2–1.4 m away (step 6, S22 Ultra, 2026-11-07,
+// depth on); rotations as Viro reported them.
+/** Tap 8: ARCore had detected the wall, so the first hit is its plane, (-85, 53, 6). */
+const WALL_PLANE_TAP: ArTap = {
+  camera: [-0.429, 0.382, 0.065],
+  hits: [
+    { kind: 'plane', position: [0.521, -0.213, 0.729], facesUp: false },
+    point([0.536, -0.223, 0.742]),
+    point([1.764, -0.991, 1.597]),
+  ],
+};
+/**
+ * Tap 10: no wall plane. Depth points on the wall 1.33 m away, then the floor plane,
+ * (180, -47, -180), which ARCore extends behind the wall: 2.87 m away.
+ */
+const FLOOR_BEHIND_WALL_TAP: ArTap = {
+  camera: [-0.473, 0.397, 0.063],
+  hits: [
+    point([0.38, -0.243, 0.854]),
+    point([0.401, -0.259, 0.885]),
+    plane([1.372, -0.989, 1.775]),
+  ],
+};
+
+describe('openingHit', () => {
+  it('takes the wall, not the floor plane behind it', () => {
+    expect(openingHit(FLOOR_BEHIND_WALL_TAP)).toBe(
+      FLOOR_BEHIND_WALL_TAP.hits[0],
+    );
+  });
+
+  it('takes a detected wall plane, even behind a nearer point', () => {
+    expect(openingHit(WALL_PLANE_TAP)).toBe(WALL_PLANE_TAP.hits[0]);
+    const [wall, nearPoint] = WALL_PLANE_TAP.hits as [ArHit, ArHit];
+    expect(
+      openingHit({ camera: WALL_PLANE_TAP.camera, hits: [nearPoint, wall] }),
+    ).toBe(wall);
+  });
+
+  it('finds no wall when the tap hits only the floor, or nothing', () => {
+    const floorOnly = {
+      camera: FLOOR_BEHIND_WALL_TAP.camera,
+      hits: [FLOOR_BEHIND_WALL_TAP.hits[2]!],
+    };
+    expect(openingHit(floorOnly)).toBeUndefined();
+    expect(openingHit({ camera: [0, 0, 0], hits: [] })).toBeUndefined();
   });
 });
 

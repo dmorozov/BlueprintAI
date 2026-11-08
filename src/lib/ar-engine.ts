@@ -75,12 +75,26 @@ export interface ArEngineViewProps {
 }
 
 /**
- * The hit a tap means when no floor rule applies (openings, and corners before the
- * room has a floor height): a detected plane, which lies exactly on the line of sight,
- * else the nearest hit, which only lies near it.
+ * The hit that fixes a corner tap's line of sight (see {@link placeCorner}): a detected
+ * plane, which lies exactly on the line of sight, else the nearest hit, which only lies
+ * near it.
  */
 export function preferredHit(tap: ArTap): ArHit | undefined {
   return tap.hits.find((hit) => hit.kind === 'plane') ?? tap.hits[0];
+}
+
+/**
+ * The hit an opening tap means: the wall under the tap. A detected wall plane lies
+ * exactly on the line of sight, so it comes first; else the nearest point. A plane
+ * facing up (the floor, a table top) never holds an opening: ARCore extends a detected
+ * floor behind walls, so a tap on a wall can hit the floor beyond it (step 6). With
+ * nothing else under the tap there is no wall to place an opening on.
+ */
+export function openingHit(tap: ArTap): ArHit | undefined {
+  return (
+    tap.hits.find((hit) => hit.kind === 'plane' && !hit.facesUp) ??
+    tap.hits.find((hit) => hit.kind === 'point')
+  );
 }
 
 /** A floor plane further than this from the room's floor height means the frame moved. */

@@ -31,7 +31,7 @@ import { useTheme } from '@/hooks/use-theme';
 import { ArCaptureSession, type ArTrackingQuality } from '@/lib/ar-capture';
 import {
   TrackingLossWatch,
-  preferredHit,
+  openingHit,
   type ArEngineHandle,
   type ArEngineStatus,
   type ArTap,
@@ -54,6 +54,8 @@ import {
 const TOAST_DURATION_MS = 2500;
 const NO_SURFACE_MESSAGE =
   'No surface detected — aim at the corner and move around slowly.';
+const NO_WALL_MESSAGE =
+  'No wall detected here — aim at the wall and move around slowly.';
 /** A fresh engine's status until it reports its own. */
 const ENGINE_STARTING: ArEngineStatus = {
   kind: 'starting',
@@ -318,9 +320,9 @@ export function ArCaptureScreen() {
         }
         syncCorners();
       } else {
-        const hit = preferredHit(tap);
+        const hit = openingHit(tap);
         if (hit === undefined) {
-          showToast(NO_SURFACE_MESSAGE);
+          showToast(NO_WALL_MESSAGE);
           return;
         }
         const location = session.locateOnWall(hit.position);

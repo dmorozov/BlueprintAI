@@ -171,7 +171,7 @@ interface ArEngineViewProps {
 - **Why:** on ticket 19's tape taps (3 tries in one room, with Clear between them), the hit point gave −7.8 / +1.0 / −39%. The floor-height rule gives −0.1 / +2.9 / −1.3%.
 - **The lock lasts for the room.** Clear and Undo keep it. Next room, Restart AR, the photo step → Next room, and any new tracking frame reset it.
   - Decided 2026-10-15, while implementing step 1: with a reset at Clear, try 3, where neither tap hit a floor plane, stayed at −46%.
-- **Openings** keep today's rule: the hit point, located on the nearest wall in plan.
+- **Openings** take the wall under the tap (`openingHit`): a detected wall plane, else the nearest point, located on the nearest wall in plan. A plane facing up never counts: ARCore extends a detected floor behind walls, so on a plain wall a tap returned the floor 1.5 m beyond the wall's own depth points (step 6). With no wall under the tap, the app says so instead of placing an opening.
 - **Implementation:** a pure `placeCorner(tap, floorY)` → `{ok: true, corner, floorY} | {ok: false, reason: 'no-hit' | 'floor-shifted'}`.
 
 ### Tracking frames and tracking loss (tickets 15, 19)
@@ -197,6 +197,7 @@ The engine stays Viro, so reference photos stay on expo-camera. The photo step u
     - a floor plane > 10 cm from the lock is refused;
     - no hits gives `no-hit`;
     - an upward line of sight gives `no-hit`.
+  - **`openingHit`:** step 6's wall taps (`logs/step-6/`): the wall's depth points over the floor plane behind it; a detected wall plane, even behind a nearer point; no wall when only the floor or nothing is hit.
   - **`viroEngineStatus`:** every row of the mapping table, including the forced-unavailable start and a logged failure that beats tracking.
   - **ar-diagnostics:** the existing 16 tests stay. Add cases for any log line Viro 3.0.3 changes (none expected).
   - **Hit mapping (`toArHit`):** the type mapping, the dropped extension, and `facesUp` from rotations recorded on the device.
@@ -246,7 +247,7 @@ Each step is sized for one `/implement` session. Steps 1–4 are AFK code with a
 
 ## Recorded Experiment Results
 
-Phone: Samsung Galaxy S22 Ultra `SM-S908U`, Android 16, security patch 2026-08-05; Play Services for AR 1.56.262080393 (tickets 00–04), then 1.57.262640093 (ticket 19). All runs used debug builds.
+Phone: Samsung Galaxy S22 Ultra `SM-S908U`, Android 16, security patch 2026-08-05; Play Services for AR 1.56.262080393 (tickets 00–04), then 1.57.262640093 (ticket 19). All runs used debug builds, except implementation step 6's release-build run (2026-11-07).
 
 | Ticket     | Question                                          | Result                                                                                                                                                                            |
 | ---------- | ------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -269,7 +270,7 @@ Phone: Samsung Galaxy S22 Ultra `SM-S908U`, Android 16, security patch 2026-08-0
 - **Risks:**
   - **Viro is maintained by a small team that has not replied on the Android 16 issues.** Mitigated by the seam (one component to replace) and the documented fork (ticket 08). Track viro#499/#568.
   - **Log-string fragility:** the failure reasons depend on Viro's log text. Mitigated by fixture-based tests and a check on every upgrade (the missed space after `error:` in ticket 04 shows the risk).
-  - **Release builds:** reading the app's own log there is unverified (plan row 9). If it fails, users get the generic reason and the 10 s catch-all.
+  - **Release builds:** reading the app's own log works there (plan row 9, step 6, 2026-11-07, on a non-debuggable build with Viro 3.0.3). If a phone or Android version blocked it, a dead session would say "The AR engine did not start. Tap Restart AR to try again." (the app cannot tell an empty log from an engine that never attached), which is about as useful as the generic reason; the specific reasons (camera holder, dark camera, ARCore failures) would be lost.
   - **Other Samsung Android 16 phones:**
     - **viro#568 (Galaxy A56)** reports tracking that flaps about 10 times a second inside Viro while plain ARCore apps work on the same phone. So it is a Viro-specific failure that could hit other users' phones.
     - **A candidate cause:** Viro always overrides ARCore's default camera config with the largest CPU image (1920×1080 on the S22U), in the `SessionNative` constructor. The ticket 06 reply asks the reporter to check; if it is confirmed, the fix is upstream or a one-change fork.

@@ -1,7 +1,7 @@
 # Implementation progress — Measure with AR reliability
 
 Spec: `docs/specs/measure-with-ar-reliability.md` (Implementation Steps 1–6, device test plan rows 1–9).
-Steps 1–3 and the resume fix are committed (`c4fb1a2`). Step 4 is done and device-checked, **uncommitted** (see "Step 4" below). Step 5 is done and device-checked, also **uncommitted** (see "Step 5" below). Next: step 6.
+All six spec steps are done. Steps 1–5 and the resume fix are committed (steps 4 and 5 in `fd9e347`). Step 6 needed no code change: its results and the spec update are **uncommitted** (see "Step 6" below).
 
 ## Where things stand
 
@@ -10,9 +10,9 @@ Steps 1–3 and the resume fix are committed (`c4fb1a2`). Step 4 is done and dev
 | 1. Seam types and pure logic | **Done, committed** (`6bbe482 step 1`) |
 | 2. `ViroArEngineView` | **Done, committed** (`6cddb3f`); device smoke passed 2026-10-17 |
 | 3. Tracking frames | **Done with step 2, committed** (`6cddb3f`); plan row 8 passed |
-| 4. Corner placement + tracking-loss rules | **Done, uncommitted**; device: `facesUp` checked and fixed, plan rows 6 and 7 passed 2026-10-17 |
-| 5. Viro 3.0.3 | **Done, uncommitted**; plan rows 1–6 passed on the S22U 2026-11-07 (row 6 at 4 ft; see below) |
-| 6. Release-build check | Not started |
+| 4. Corner placement + tracking-loss rules | **Done, committed** (`fd9e347`); device: `facesUp` checked and fixed, plan rows 6 and 7 passed 2026-10-17 |
+| 5. Viro 3.0.3 | **Done, committed** (`fd9e347`); plan rows 1–6 passed on the S22U 2026-11-07 (row 6 at 4 ft; see below) |
+| 6. Release-build check | **Done** 2026-11-07: the app reads its own log in a release build, so no code change. Results and the spec's risk line are uncommitted |
 
 Also open: **ticket 06**. The four upstream drafts in `upstream/` are waiting to be posted. Send the comment and issue links back so they can be recorded on the ticket and it can be closed.
 
@@ -79,7 +79,7 @@ The phone state before and after matches, apart from the header timestamp.
   - The phone state matches the baseline again.
 - **For step 4:** the background trip now shows as `starting` (from Home until tracking returns), not as `lost`. So the long-loss warning (≥ 3 s) should count any non-tracking status after the session has tracked, `starting` included. Otherwise a Home trip mid-trace never warns.
 
-## Step 4 (uncommitted)
+## Step 4 (committed in `fd9e347`)
 
 All checks pass: `npm test` (117 tests), `npm run lint`, `npm run typecheck`, `npx prettier --check src CONTEXT.md`. The temporary `[ar-hit]`, `[ar-corner]` and `[ar-trace]` lines used on the phone are removed.
 
@@ -150,7 +150,7 @@ S22U `R5CTA2PB2ZX`, debug dev client over Metro, Play Services for AR 1.57.26264
   - Options: leave it; or ask in the bottom bar, away from the AR view, and refuse corner taps until it's answered. **Needs the user's decision.**
 - **Harness note:** the first Home attempt was really a tap on the in-app back arrow (the phone uses the 3-button bar), so the screen remounted three times. It was rerun with the middle (Home) button.
 
-## Step 5 (uncommitted)
+## Step 5 (committed in `fd9e347`)
 
 - **Done (2026-10-17):**
   - `pnpm add -E @reactvision/react-viro@3.0.3`: `package.json` pins `"3.0.3"`, and `pnpm-lock.yaml` is updated.
@@ -208,9 +208,58 @@ Logs are in `logs/step-5/`: `session.logcat.txt` (the log read back from the pho
   - Docker Desktop held port 8081, so Metro ran on 8082 with `adb reverse tcp:8081 tcp:8082` (the dev client still asks for 8081).
   - "Measure with photos" only shows with `EXPO_PUBLIC_PHOTO_ASSIST_URL` set. Path 3 used a placeholder (`http://127.0.0.1:9`) for that Metro session only; the screen makes no network call until Analyze.
 
+## Step 6 release-build run: results (2026-11-07)
+
+Plan row 9: one run of rows 1–3 and 5–6, plus a failure reason on screen, on a **release** build.
+
+- **Build:**
+  - `EXPO_PUBLIC_PHOTO_ASSIST_URL=http://127.0.0.1:9 ./gradlew :app:assembleRelease -PreactNativeArchitectures=arm64-v8a` (`logs/step-6/build.log`). The placeholder URL only shows the "Measure with photos" button for row 3.
+  - It is the project's real release configuration: no R8 (`android.enableMinifyInReleaseBuilds` is unset), Hermes bytecode bundle, and signed with the debug keystore as the template does. There is no `eas.json`.
+  - The manifest has no `debuggable`; on the phone the package's flags lost `DEBUGGABLE`. `libviro_renderer.so` is byte-identical to the dev client's (3.0.3).
+  - A copy is at `logs/step-6/app-release-viro-3.0.3.apk`.
+- **Instrumentation:** the step 5 temporary lines (`[ar-trace]`, `[ar-hit]`, `[ar-corner]`, `[ar-opening]`), plus `[ar-diag]` in `viro-ar-engine-view.tsx`: the diagnostics the app built from its own log. React Native's `console.log` reaches logcat in a release build too. All of them are removed again; `src` matches `fd9e347`.
+- **Scripts:** `logs/step-6/scripts/`: the step 5 scripts pointed at `logs/step-6`, with `cold.sh` also printing the milestones the app read (`app-read=`). New: `clear.sh` (taps Clear only when no dialog is showing) and `camera-off.sh` (turns camera access off with `cmd sensor_privacy`, presses Cancel on the system dialog, turns access back on; nothing for the person to do but hold the phone).
+
+S22U `R5CTA2PB2ZX`, Play Services for AR 1.57.262640293 (unchanged since step 5).
+
+| Plan row | Result |
+|---|---|
+| **`logcat --pid` in a release build** | **Readable.** In every one of the 10 cold starts the app itself read all four milestones from its own log (`engine-attached`, `arcore-ready`, `session-created`, `session-resumed`), as did every later session. |
+| 1, ×10 | **Pass 10/10.** "Tracking good" 2.34–2.92 s after the tap (debug: 3.02–4.17 s); only "Starting AR…" before it. |
+| 2, ×3 | **Pass 3/3.** Same frame, 0 remounts; "Tracking good" again 1.57–1.67 s after returning, only `starting` in between. |
+| 3, 2× each path | **Pass 6/6, 0 evictions, 0 crashes.** "Tracking good" after opening AR: Sample plan → Back 3.09 / 3.10 s; Measure with photos → Back 3.72 / 3.07 s; Reference photos → Next room 3.87 / 3.80 s. The first two Sample-plan attempts were harness failures (the phone had locked; then Back left the app before the scripted AR tap) and were rerun. |
+| 4, camera access off (the failure-reason check) | **Pass.** Over adb: access off → AR → Cancel on "Turn on Camera access?" → after 10.3 s the screen showed "The camera image is dark or blank. … camera access is not turned off in Quick Settings, then tap Restart AR." That reason needs the milestones read from the log; without them the app says "The AR engine did not start". Access back on → "Tracking good" in the **same** frame. |
+| 5 | **Pass 9/10** (fresh session, Openings mode, about 1.2–1.4 m). Taps 1–9 hit the wall's depth and lie on one vertical plane (RMS 4.3 cm; step 5: 9.5 cm). Tap 10 went to the **floor plane behind the wall** (2.87 m), although depth points on the wall were hit at 1.33 m: see the observation below. A first attempt with the plain wall filling the whole view lost tracking ("not enough detail"), so taps were ignored; it was redone with furniture in view. |
+| 6 (4 ft, 1.219 m) | **3/6 within 3%.** From one spot, both ends about 1.9 m away: −3.9 / −0.1 / −4.3%. Standing over each end (the user's choice of retry): −1.6 / −0.7 / +3.2%. Mean −1.2%. Every corner was a floor-plane hit at the room's locked height (−1.125 m, then −1.240 m in the second session). |
+
+- **Row 6 reading:** on a tape that did not move, the taps at each end spread 3–6 cm between tries (far end from a distance: 9 cm), while 3% at 4 ft is 3.7 cm for both ends together. The hit test is the same native library and JS as the debug build (step 5: 3/3 at 4 ft), so the misses are tap placement, not the build. The row's 3% budget is close to finger scatter at 1.2 m; a longer tape (2–3 m) would test the app rather than the finger.
+- **No crashes:** no `FATAL EXCEPTION` or `Fatal signal` from the app in the whole run. The 29 `SIGSEGV` matches in the log are a T-Mobile app (`SCP`) logging its own signal handlers.
+- **Phone state:** restored. The dev client (`logs/step-5/app-debug-viro-3.0.3.apk`, debuggable) is reinstalled, "stay on while plugged in" is back to 0 (it was set to USB during the run so the phone would not lock), camera access is on. `phone-state-before/after.txt` differ only in the camera toggle's `last_change` and the app's `lastUpdateTime`.
+
+**Observations (none blocks step 6):**
+- **Openings can land behind the wall.** `preferredHit` takes a plane hit before point hits, and ARCore's floor plane extends behind a wall, so a tap on a wall returned the floor 1.5 m beyond the wall's own depth points (tap 10). **Fixed and device-checked afterwards, uncommitted:** see "Fix: openings take the wall" below.
+- **The accidental dialog answer again, this time by the harness:** the phone lay down for 13 s while two corners were placed, "Tracking was interrupted" appeared when tracking came back, and a scripted Clear tap answered it with "Restart room". This is the step 4 issue (ask in the bottom bar instead); `clear.sh` now checks for a dialog first.
+- **The dead-session countdown did not stall this time:** Cancel was pressed within about 2 s, so the message came 10.3 s after opening AR (step 5: 73 s with the dialog left up).
+
+## Fix: openings take the wall (uncommitted, 2026-11-07)
+
+- **Bug (step 6, row 5, tap 10):** an opening tap on a plain wall returned the floor plane ARCore had extended behind the wall (2.87 m), not the wall's depth points (1.33 m), because Openings used `preferredHit` (any plane first). `locateOnWall` then projects that point onto the nearest wall, so the opening lands at the wrong place along the wall, or on another wall.
+- **Fix:** new `openingHit(tap)` in `src/lib/ar-engine.ts`: a plane that does not face up (a detected wall), else the nearest point; never a plane facing up. With neither, the screen says "No wall detected here — aim at the wall and move around slowly." (before: the corner-oriented "No surface detected — aim at the corner…").
+  - Corners keep `preferredHit` inside `placeCorner`, so the floor lock and its tests are unchanged.
+  - Behaviour change: a tap in Openings mode that hits only the floor now places nothing. Before, it projected the floor point onto the nearest wall, which is how the wrong openings happened.
+- **Tests (TDD, red then green):** three `openingHit` cases in `ar-engine.test.ts` from step 6's taps 8 and 10 (`logs/step-6/wall.logcat.txt`). 120 tests, typecheck, lint and prettier pass.
+- **Device check (2026-11-07, dev client, Metro):** Openings mode, 12 taps on the plain wall with floor in view (`logs/fix-openings/`; `scripts/openings.js` summarises the temporary `[ar-opening]` lines, since removed).
+  - Every tap took the nearest point on the wall (1.2–1.7 m); none got "No wall detected".
+  - Tap 1 reproduced the bug's case: wall point at 1.45 m, the floor plane behind the wall at 1.92 m. The old rule would have taken the floor, 47 cm behind the wall; the fix took the wall point.
+  - Two taps at the foot of the wall hit the floor plane and wall points at the same spot (4 cm apart); the fix took the point, which changes nothing there.
+  - The phone state matches before and after; Metro and `adb reverse` are stopped.
+
 ## After that
 
-- **Step 6:** plan row 9 on a release build. If `logcat --pid` cannot be read there, record that the app falls back to generic reasons.
+- All six spec steps are done. Open items:
+  - **Ticket 06:** post the four upstream drafts in `upstream/` and send the links back so they can be recorded.
+  - **Decisions for the user:** move the long-loss and floor-moved prompts to the bottom bar (accidental answers, seen three times); the long loss between rooms (left for later); after "The floor moved" → Keep tracing, point-only taps still use the old floor height.
+  - **Row 6 method:** repeat with a tape of 2–3 m when one is available.
 
 ## Practical notes
 
@@ -218,4 +267,8 @@ Logs are in `logs/step-5/`: `session.logcat.txt` (the log read back from the pho
 - The phone's log ring buffer holds roughly the last 9 minutes, so untethered runs can be read after replugging.
 - Play Services for AR was 1.57.262640093 on 2026-10-15 and 1.57.262640293 on 2026-11-07 (rows 1, 5 and 6 passed on it). Re-run plan rows 1, 5 and 6 when it changes.
 - If port 8081 is taken on the Mac (Docker Desktop held it on 2026-11-07), run Metro with `--port 8082` and `adb reverse tcp:8081 tcp:8082`.
+- A release build needs no Metro. Install it over the dev client with `adb install -r` (same debug keystore, app data kept), and reinstall the dev client APK afterwards.
+- Camera access can be toggled over adb: `adb shell cmd sensor_privacy enable 0 camera` / `disable 0 camera`.
+- Wall taps need some texture in view (furniture, the floor); a plain wall filling the whole view loses tracking.
+- Taps on the AR view can answer a dialog that has just opened; check for one before a scripted tap (`logs/step-6/scripts/clear.sh`).
 - **Suggested skills for the next session:** `tdd` (step 4's pure parts: the floor lock per room and the loss rule), `implement` (the spec steps), `code-review` (after each step), `diagnosing-bugs` (if a device run fails).
